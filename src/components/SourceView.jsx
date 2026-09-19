@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FileCode2,
   X,
   ArrowLeft,
   ArrowRight,
   ChevronRight,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Braces,
   Code2,
   FolderOpen,
@@ -16,6 +19,39 @@ import {
 import { Icon, basename } from "../util";
 import Resizer from "./Resizer";
 import SourceMinimap from "./SourceMinimap";
+
+function indentWidth(line) {
+  let width = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === " ") width += 1;
+    else if (ch === "\t") width += 4 - (width % 4);
+    else break;
+  }
+  return width;
+}
+
+function computeFoldRanges(source) {
+  const lines = source.split("\n");
+  const isBlank = (line) => /^\s*$/.test(line);
+  const ranges = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (isBlank(lines[i])) continue;
+    const base = indentWidth(lines[i]);
+    let next = i + 1;
+    while (next < lines.length && isBlank(lines[next])) next++;
+    if (next >= lines.length || indentWidth(lines[next]) <= base) continue;
+    let end = next;
+    while (end < lines.length) {
+      if (!isBlank(lines[end]) && indentWidth(lines[end]) <= base) break;
+      end++;
+    }
+    let last = end - 1;
+    while (last > i && isBlank(lines[last])) last--;
+    if (last > i) ranges.push({ start: i, end: last });
+  }
+  return ranges;
+}
 
 export default function SourceView({
   file,
@@ -81,6 +117,44 @@ export default function SourceView({
     return () => observer.disconnect();
   }, [codeRef, file, tokens]);
 
+  const [collapsed, setCollapsed] = useState(new Set());
+  const foldRanges = useMemo(
+    () => (file ? computeFoldRanges(file.source) : []),
+    [file],
+  );
+  const foldByStart = useMemo(
+    () => new Map(foldRanges.map((r) => [r.start, r])),
+    [foldRanges],
+  );
+  const hiddenLines = useMemo(() => {
+    const hidden = new Set();
+    for (const r of foldRanges) {
+      if (collapsed.has(r.start)) {
+        for (let i = r.start + 1; i <= r.end; i++) hidden.add(i);
+      }
+    }
+    return hidden;
+  }, [foldRanges, collapsed]);
+
+  useEffect(() => {
+    setCollapsed(new Set());
+  }, [file?.path]);
+
+  function toggleFold(start) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(start)) next.delete(start);
+      else next.add(start);
+      return next;
+    });
+  }
+  function foldAll() {
+    setCollapsed(new Set(foldRanges.map((r) => r.start)));
+  }
+  function unfoldAll() {
+    setCollapsed(new Set());
+  }
+
   const closeTab = (tab) => {
     clearTabState(tab);
     const next = tabs.filter((t) => t !== tab);
@@ -144,6 +218,16 @@ export default function SourceView({
             <b>{activeScope.name}</b>
           </>
         )}
+        {file && foldRanges.length > 0 && (
+          <span className="breadcrumb-folds">
+            <button title="Fold all blocks" onClick={foldAll}>
+              <ChevronsDownUp size={13} />
+            </button>
+            <button title="Unfold all blocks" onClick={unfoldAll}>
+              <ChevronsUpDown size={13} />
+            </button>
+          </span>
+        )}
         <span className="breadcrumb-end">{file?.lines || 0} lines</span>
       </div>
       <div className="source-shell">
@@ -175,16 +259,38 @@ export default function SourceView({
           ) : (
             <div className="code" role="region" aria-label="Python source">
             {file.source.split("\n").map((text, row) => {
+              if (hiddenLines.has(row)) return null;
               const rowRefs = referencesByLine.get(row + 1) || [];
               const lineRefs = rowRefs.filter(
                 (r) => r.symbolId === selectedId,
               );
+              const fold = foldByStart.get(row);
               return (
                 <div
                   key={row}
                   data-line={row + 1}
                   className={`code-line ${line === row + 1 ? "current-line" : ""}`}
                 >
+                  <button
+                    className={`fold-toggle ${fold ? "" : "fold-toggle-empty"}`}
+                    aria-label={
+                      fold
+                        ? collapsed.has(row)
+                          ? "Expand folded block"
+                          : "Collapse block"
+                        : undefined
+                    }
+                    aria-expanded={fold ? !collapsed.has(row) : undefined}
+                    disabled={!fold}
+                    onClick={() => toggleFold(row)}
+                  >
+                    {fold &&
+                      (collapsed.has(row) ? (
+                        <ChevronRight size={12} />
+                      ) : (
+                        <ChevronDown size={12} />
+                      ))}
+                  </button>
                   <button
                     className="line-number"
                     onClick={() => {
