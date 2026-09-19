@@ -326,5 +326,35 @@ class TypeSystemTests(unittest.TestCase):
         self.assertIn('Row', file['declaration']['aliases'])
         self.assertEqual(file['declaration']['aliases']['Row']['display'], '{id: int}')
 
+    def test_self_is_typed_as_the_enclosing_class(self):
+        repo = self.index({'app.py': '''class Base:
+    def __init__(self):
+        pass
+    @classmethod
+    def make(cls):
+        return cls()
+    @staticmethod
+    def helper(thing):
+        return thing
+class Child(Base):
+    def run(self):
+        return self
+'''})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['__init__']['computedType'], '(self: Base) -> None')
+        self.assertEqual(symbols['run']['computedType'], '(self: Child) -> Child')
+        self.assertEqual(symbols['helper']['computedType'], '(thing: ?) -> ?')
+        receivers = {
+            s['computedType']
+            for s in repo['files'][0]['symbols']
+            if s['kind'] == 'parameter' and s['name'] in ('self', 'cls')
+        }
+        self.assertEqual(receivers, {'Base', 'Child'})
+
+    def test_declaration_keeps_method_receiver(self):
+        repo = self.index({'app.py': 'class Repo:\n    def get(self, key: str):\n        return self._items[key]\n', 'app.pxd': 'prop get(key: str) -> str\n'})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['get']['computedType'], '(self: Repo, key: str) -> str')
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)

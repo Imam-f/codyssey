@@ -785,9 +785,25 @@ class TypeChecker(ast.NodeVisitor):
         )
         param_annotations = []
         args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
-        for arg in args:
-            ann = parse_type(ast.unparse(arg.annotation)) if arg.annotation else Unknown()
-            param_annotations.append((arg.arg, ann))
+
+        # A method's receiver (``self``/``cls``) is typed as the enclosing class,
+        # never Unknown. staticmethods have no implicit receiver.
+        class_name = None
+        for scope in reversed(self.scopes):
+            if scope["kind"] == "class":
+                class_name = scope["name"]
+                break
+        decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
+        is_static = "staticmethod" in decorators
+        receiver = None
+        if class_name and not is_static and args and args[0].arg in ("self", "cls"):
+            receiver = (args[0].arg, Named(class_name))
+
+        for index, arg in enumerate(args):
+            ann = parse_type(ast.unparse(arg.annotation)) if arg.annotation else None
+            if ann is None and class_name and not is_static and index == 0 and arg.arg in ("self", "cls"):
+                ann = Named(class_name)
+            param_annotations.append((arg.arg, ann if ann is not None else Unknown()))
         ret_annotation = parse_type(ast.unparse(node.returns)) if node.returns else None
 
         effect = "unknown"
@@ -807,6 +823,10 @@ class TypeChecker(ast.NodeVisitor):
         else:
             params = param_annotations
             final_ret = ret_annotation
+
+        # Declarations may omit the method receiver; self/cls is always the class.
+        if receiver and (not params or params[0][0] != receiver[0]):
+            params = [receiver] + params
 
         self.push("function", node.name)
         for name, ann in params:

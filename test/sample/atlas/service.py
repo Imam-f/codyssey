@@ -15,13 +15,15 @@ class UserService(BaseService):
     """Application operations for user accounts."""
 
     def find_user(self, user_id: str) -> UserModel:
-        user: UserModel = self.repository.get(user_id)
+        user: UserModel | None = self.repository.get(user_id)
         if user is None:
             raise UserNotFound(user_id)
         return user
 
     def update_email(self, user_id: str, email: str) -> UserModel:
-        user: UserModel = self.find_user(user_id)
+        user: UserModel | None = self.repository.get(user_id)
+        if user is None:
+            raise UserNotFound(user_id)
         normalized: str = email.strip().lower()
         previous: str = user.email
 

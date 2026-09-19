@@ -26,7 +26,7 @@ class User(Entity):
 
 @dataclass
 class Admin(User):
-    permissions: list[str] = None
+    permissions: list[str] | None = None
 
     def can_access(self, resource: str) -> bool:
         permissions = self.permissions or []
