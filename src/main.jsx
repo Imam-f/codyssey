@@ -121,6 +121,7 @@ function App() {
     [busy, setBusy] = useState(true),
     [error, setError] = useState("");
   const [callFocus, setCallFocus] = useState(null);
+  const [activeReference, setActiveReference] = useState(null);
   const [path, setPath] = useState(""),
     [selectedId, setSelectedId] = useState(null),
     [line, setLine] = useState(1);
@@ -163,6 +164,9 @@ function App() {
     [repo],
   );
   const selected = symbols.find((s) => s.id === selectedId);
+  const definition = activeReference
+    ? activeReference.definition
+    : selected?.definition || (selected?.kind !== "import" ? selected : null);
   const activeScope = file?.scopes
     .filter((s) => s.kind === "function" && s.line <= line && s.endLine >= line)
     .sort((a, b) => b.line - a.line)[0];
@@ -171,6 +175,7 @@ function App() {
       ? selected.id
       : symbols.find((s) => s.bodyScopeId === activeScope?.id)?.id;
   function focusCall(id) {
+    setActiveReference(null);
     setCallFocus(id);
     setView("calls");
     const node = repo?.callGraph?.nodes.find((n) => n.id === id);
@@ -208,6 +213,7 @@ function App() {
       const data = await api[method]();
       if (!data) return;
       setRepo(data);
+      setActiveReference(null);
       setCallFocus(null);
       const next =
         data.files.find((f) => f.path === path) ||
@@ -262,22 +268,27 @@ function App() {
     }
   }, [notice]);
 
-  function navigate(target, remember = true) {
+  function navigate(target, remember = true, origin = null) {
     if (!target) return;
     const dest = {
       path: target.path || path,
       line: target.line || 1,
       id: target.id || target.symbolId || null,
+      reference: target.reference || null,
     };
     if (remember) {
       const next = history.slice(0, historyIndex + 1);
-      next.push({ path, line, id: selectedId }, dest);
+      next.push(
+        origin || { path, line, id: selectedId, reference: activeReference },
+        dest,
+      );
       setHistory(next);
       setHistoryIndex(next.length - 1);
     }
     setPath(dest.path);
     setLine(dest.line);
     setSelectedId(dest.id);
+    setActiveReference(dest.reference);
     setView("source");
     setTabs((prev) => (prev.includes(dest.path) ? prev : [...prev, dest.path]));
   }
@@ -290,6 +301,23 @@ function App() {
   function jumpType() {
     const target = symbols.find((s) => s.id === selected?.typeTargets?.[0]);
     if (target) navigate(target);
+  }
+  function goToDefinition(ref = null) {
+    const target = ref ? ref.definition : definition;
+    if (target)
+      navigate(
+        target,
+        true,
+        ref
+          ? {
+              path: ref.path,
+              line: ref.line,
+              id: ref.symbolId || ref.definition?.id || null,
+              reference: ref,
+            }
+          : null,
+      );
+    else setNotice("No definition found in the indexed repository");
   }
   async function exportReport() {
     try {
@@ -320,7 +348,7 @@ function App() {
       if (e.key === "F12") {
         e.preventDefault();
         if (e.ctrlKey) jumpType();
-        else if (selected) navigate(selected);
+        else goToDefinition();
       }
       if (e.key === "F5") {
         e.preventDefault();
@@ -461,9 +489,7 @@ function App() {
           <Resizer
             orientation="vertical"
             label="Resize explorer"
-            onResize={(d) =>
-              setSidebarWidth((w) => clamp(w + d, 160, 520))
-            }
+            onResize={(d) => setSidebarWidth((w) => clamp(w + d, 160, 520))}
           />
         )}
         <main className="main">
@@ -596,7 +622,10 @@ function App() {
                         >
                           <button
                             className="line-number"
-                            onClick={() => setLine(row + 1)}
+                            onClick={() => {
+                              setLine(row + 1);
+                              setActiveReference(null);
+                            }}
                           >
                             {row + 1}
                           </button>
@@ -619,26 +648,33 @@ function App() {
                               return (
                                 <span
                                   key={i}
-                                  className={`syntax-${token.kind} ${lineRefs.some((r) => r.column === token.start && r.name === token.text) ? "occurrence" : ""} ${ref?.symbolId ? "clickable-token" : ""}`}
+                                  className={`syntax-${token.kind} ${lineRefs.some((r) => r.column === token.start && r.name === token.text) ? "occurrence" : ""} ${ref?.symbolId || ref?.definition ? "clickable-token" : ""}`}
                                   title={
-                                    ref?.symbolId
-                                      ? `${ref.name} · ${ref.role} · click to inspect`
+                                    ref
+                                      ? `${ref.name} · ${ref.role}${ref.definition ? ` · ${ref.definition.path}:${ref.definition.line} · Ctrl+click or F12 to go to definition` : " · no indexed definition"}`
                                       : undefined
                                   }
-                                  onClick={() => {
+                                  onClick={(event) => {
                                     setLine(row + 1);
-                                    if (ref?.symbolId) {
-                                      setSelectedId(ref.symbolId);
+                                    if (ref) {
+                                      if (event.ctrlKey || event.metaKey) {
+                                        goToDefinition(ref);
+                                        return;
+                                      }
+                                      setSelectedId(
+                                        ref.symbolId ||
+                                          ref.definition?.id ||
+                                          null,
+                                      );
+                                      setActiveReference(ref);
                                       setInspector("symbol");
+                                    } else {
+                                      setActiveReference(null);
+                                      setSelectedId(null);
                                     }
                                   }}
                                   onDoubleClick={() => {
-                                    if (ref?.symbolId)
-                                      navigate(
-                                        symbols.find(
-                                          (s) => s.id === ref.symbolId,
-                                        ),
-                                      );
+                                    if (ref) goToDefinition(ref);
                                   }}
                                 >
                                   {token.text}
@@ -662,7 +698,10 @@ function App() {
                   )
                 }
               />
-              <section className="bottom-panel" style={{ height: bottomHeight }}>
+              <section
+                className="bottom-panel"
+                style={{ height: bottomHeight }}
+              >
                 <div className="bottom-tabs">
                   <button
                     className={bottom === "references" ? "active" : ""}
@@ -888,9 +927,7 @@ function App() {
                     })}
                 </div>
                 <div className="detail-section">
-                  <div className="section-label">
-                    DECLARATION<kbd>F12</kbd>
-                  </div>
+                  <div className="section-label">DECLARATION</div>
                   <button
                     className="declaration-link"
                     onClick={() => navigate(selected)}
@@ -907,6 +944,25 @@ function App() {
                       [selected.line - 1]?.trim()}
                   </code>
                 </div>
+                {definition &&
+                  (definition.path !== selected.path ||
+                    definition.line !== selected.line) && (
+                    <div className="detail-section definition-section">
+                      <div className="section-label">
+                        DEFINITION<kbd>F12</kbd>
+                      </div>
+                      <button
+                        className="declaration-link"
+                        title="Go to definition"
+                        onClick={() => goToDefinition()}
+                      >
+                        <FileCode2 size={13} />
+                        <span>{definition.path}</span>
+                        <b>:{definition.line}</b>
+                        <ArrowUpRight size={13} />
+                      </button>
+                    </div>
+                  )}
                 <div className="detail-section">
                   <div className="section-label">SCOPE</div>
                   <div className="scope-name">

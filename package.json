@@ -13,6 +13,7 @@
     "start": "electron .",
     "test": "uv run --script backend/test_analyzer.py",
     "test:ui": "node scripts/smoke.mjs",
+    "test:definitions": "node scripts/definitions-smoke.mjs",
     "postinstall": "node scripts/assets.mjs",
     "pack": "npm run build && electron-builder --dir"
   },
@@ -47,7 +48,8 @@
         "to": "backend",
         "filter": [
           "analyzer.py",
-          "callgraph.py"
+          "callgraph.py",
+          "definitions.py"
         ]
       },
       {

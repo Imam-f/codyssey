@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import tokenize
 from callgraph import link_calls
+from definitions import link_definitions
 
 EXCLUDED = {'.git', '.venv', 'venv', 'env', '__pycache__', 'node_modules', 'dist', 'build', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'site-packages'}
 MAX_FILE = 2_000_000
@@ -160,11 +161,19 @@ class Indexer(ast.NodeVisitor):
         if isinstance(node.ctx, ast.Store): self.bind(node.id, node)
         else: self.reference(node.id, node, 'delete' if isinstance(node.ctx, ast.Del) else 'read')
 
+    def visit_Attribute(self, node):
+        self.visit(node.value)
+        # AST columns are UTF-8 byte offsets; the renderer uses UTF-16 columns.
+        marker = ast.Name(id=node.attr, lineno=node.end_lineno, col_offset=node.end_col_offset - len(node.attr.encode('utf-8')), end_lineno=node.end_lineno)
+        self.references.append({'name': node.attr, 'expression': ast.unparse(node), 'path': self.path, 'scopeId': self.scope['id'], 'role': 'write' if isinstance(node.ctx, ast.Store) else 'read', 'symbolId': None, **self.location(marker)})
+
     def visit_Call(self, node):
         if not self.annotation_depth:
             self.calls.append({'expression': ast.unparse(node.func), 'scopeId': self.scope['id'], 'path': self.path, **self.location(node.func)})
         if isinstance(node.func, ast.Name): self.reference(node.func.id, node.func, 'call')
-        else: self.visit(node.func)
+        else:
+            self.visit(node.func)
+            if isinstance(node.func, ast.Attribute): self.references[-1]['role'] = 'call'
         for arg in node.args: self.visit(arg)
         for keyword in node.keywords: self.visit(keyword.value)
 
@@ -223,6 +232,7 @@ class Indexer(ast.NodeVisitor):
             name = alias.asname or alias.name.split('.')[0]
             symbol = self.bind(name, alias, 'import', alias.name)
             self.add_import(name, alias.name if alias.asname else name, symbol, alias)
+            self.import_tokens(alias, symbol)
 
     def visit_ImportFrom(self, node):
         for alias in node.names:
@@ -231,6 +241,18 @@ class Indexer(ast.NodeVisitor):
             target = '.' * node.level + (node.module + '.' if node.module else '') + alias.name
             symbol = self.bind(name, alias, 'import', target)
             self.add_import(name, target, symbol, alias)
+            if alias.asname:
+                self.reference(alias.name, alias, 'import', symbol['id'])['importTarget'] = target
+
+    def import_tokens(self, alias, symbol):
+        offset = 0
+        parts = alias.name.split('.')
+        for i, name in enumerate(parts):
+            if alias.asname or i:
+                loc = self.location(alias)
+                loc['column'] += offset
+                self.reference(name, alias, 'import', symbol['id'], loc)['importTarget'] = '.'.join(parts[:i + 1])
+            offset += len(name.encode('utf-16-le')) // 2 + 1
 
     def add_import(self, name, target, symbol, node):
         self.imports.append({'name': name, 'target': target, 'scopeId': self.scope['id'], 'symbolId': symbol['id']})
@@ -331,6 +353,7 @@ def analyze(root):
                 diagnostics.append({'path': relative, 'line': 1, 'severity': 'error', 'message': str(exc)})
         if len(files) >= MAX_FILES: break
     link_repository(files)
+    link_definitions(files)
     call_graph = link_calls(files)
     return {'name': root.name, 'root': str(root), 'files': files, 'diagnostics': diagnostics, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
 

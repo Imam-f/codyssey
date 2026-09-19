@@ -478,6 +478,13 @@ i {
   overflow: auto;
   min-height: 120px;
   scrollbar-gutter: stable;
+  cursor: text;
+}
+.source-area button {
+  cursor: text;
+}
+.source-area .clickable-token {
+  cursor: pointer;
 }
 .code {
   font-family: var(--mono);

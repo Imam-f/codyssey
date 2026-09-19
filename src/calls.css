@@ -59,7 +59,9 @@
 .call-graph-detail {
   min-width: 0;
   flex: 1;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background-image: radial-gradient(#323941 1px, transparent 1px);
   background-size: 20px 20px;
 }
@@ -70,9 +72,7 @@
   background: #14171b;
   border-bottom: 1px solid var(--line);
   padding: 10px 12px;
-  position: sticky;
-  left: 0;
-  min-width: 620px;
+  flex-shrink: 0;
 }
 .call-direction button {
   font-size: 10px;
@@ -94,14 +94,34 @@
   padding: 24px 18px 40px;
   min-width: 670px;
   align-items: start;
+  position: relative;
+  transform-origin: top left;
 }
 .call-flow.incoming,
 .call-flow.outgoing {
   grid-template-columns: repeat(2, minmax(200px, 1fr));
   min-width: 480px;
 }
+.call-canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+.call-canvas:active {
+  cursor: grabbing;
+}
+.call-arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 0;
+}
 .call-column {
   position: relative;
+  z-index: 1;
 }
 .call-column h3 {
   color: #7f8d9a;
@@ -182,55 +202,6 @@
   color: #aac6b8;
   font-size: 9px;
   gap: 2px;
-}
-.callers .call-node:after,
-.callees .call-node:before {
-  content: "";
-  position: absolute;
-  top: 25px;
-  height: 1px;
-  width: 17px;
-  background: #778f81;
-}
-.callers .call-node:after {
-  right: -18px;
-}
-.callees .call-node:before {
-  left: -18px;
-}
-.callers:has(.call-node):after,
-.callees:has(.call-node):before {
-  content: "";
-  position: absolute;
-  top: 63px;
-  bottom: 66px;
-  width: 1px;
-  background: #778f81;
-}
-.callers:after {
-  right: -17px;
-}
-.callees:before {
-  left: -17px;
-}
-.selected-function:before,
-.selected-function:after {
-  content: "→";
-  position: absolute;
-  top: 52px;
-  font-size: 20px;
-  color: #99b8a5;
-  width: 18px;
-}
-.selected-function:before {
-  left: -18px;
-}
-.selected-function:after {
-  right: -20px;
-}
-.incoming .selected-function:after,
-.outgoing .selected-function:before {
-  display: none;
 }
 .recursion-link {
   display: flex;

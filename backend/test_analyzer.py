@@ -138,4 +138,59 @@ class CallGraphTests(unittest.TestCase):
         self.assertEqual(self.edges(graph), {('run','work'),('run','A.work'),('run','B.work')})
 
 
+class DefinitionTests(unittest.TestCase):
+    index = AnalyzerTests.index
+
+    def reference(self, repo, path, name, line):
+        file = next(f for f in repo['files'] if f['path'] == path)
+        return next(r for r in file['references'] if r['name'] == name and r['line'] == line)
+
+    def test_imported_function_class_constant_and_original_alias_token(self):
+        repo = self.index({'lib.py': 'LIMIT = 3\ndef run(): pass\nclass Model: pass\n', 'use.py': 'from lib import run as execute, Model, LIMIT\ndef caller():\n    execute()\n    item = Model()\n    return LIMIT\n'})
+        for name, line, target_line in [('execute',3,2),('Model',4,3),('LIMIT',5,1),('run',1,2),('execute',1,2)]:
+            ref = self.reference(repo,'use.py',name,line)
+            self.assertEqual((ref['definition']['path'],ref['definition']['line']),('lib.py',target_line))
+            self.assertNotEqual(ref['symbolId'],ref['definition']['id'])
+
+    def test_qualified_access_and_module_navigation(self):
+        repo = self.index({'pkg/__init__.py': '', 'pkg/lib.py':'LIMIT = 3\ndef run(): pass\n', 'use.py':'import pkg.lib as m\nimport pkg.lib\nm.run()\nvalue = pkg.lib.LIMIT\n'})
+        for name,line,target_path,target_line in [('m',3,'pkg/lib.py',1),('run',3,'pkg/lib.py',2),('LIMIT',4,'pkg/lib.py',1),('lib',4,'pkg/lib.py',1),('lib',1,'pkg/lib.py',1),('pkg',2,'pkg/__init__.py',1)]:
+            target=self.reference(repo,'use.py',name,line)['definition']
+            self.assertEqual((target['path'],target['line']),(target_path,target_line))
+
+    def test_reexports_src_layout_typed_and_inherited_methods(self):
+        repo=self.index({'src/pkg/base.py':'class Base:\n    def save(self): pass\n', 'src/pkg/__init__.py':'from .base import Base as PublicBase\n', 'src/pkg/use.py':'from pkg import PublicBase as B\nclass Child(B): pass\ndef run(obj: B):\n    obj.save()\n    item = Child()\n    item.save()\n'})
+        for line in (4,6):
+            target=self.reference(repo,'src/pkg/use.py','save',line)['definition']
+            self.assertEqual((target['path'],target['line']),('src/pkg/base.py',2))
+        file=next(f for f in repo['files'] if f['path']=='src/pkg/use.py')
+        self.assertEqual(file['classes'][0]['baseIds'][0],next(f for f in repo['files'] if f['path']=='src/pkg/base.py')['classes'][0]['id'])
+
+    def test_bound_method_reference_and_constructor_field(self):
+        repo=self.index({'lib.py':'class Repo:\n    def save(self): pass\nclass Service:\n    def __init__(self, repo: Repo):\n        self.repo = repo\n    def run(self):\n        callback = self.repo.save\n        callback()\n', 'use.py':'from lib import Repo, Service\ndef run():\n    service = Service(Repo())\n    service.run()\n    return service.repo\n'})
+        self.assertEqual(self.reference(repo,'lib.py','save',7)['definition']['line'],2)
+        self.assertEqual(self.reference(repo,'use.py','run',4)['definition']['line'],6)
+        target=self.reference(repo,'use.py','repo',5)['definition']
+        self.assertEqual((target['path'],target['line']),('lib.py',5))
+
+    def test_local_shadowing_rebinding_and_unknown_receivers(self):
+        repo=self.index({'lib.py':'def work(): pass\n', 'use.py':'from lib import work\ndef run(work, obj):\n    work()\n    obj.work()\nwork = 5\nprint(work)\n'})
+        self.assertEqual(self.reference(repo,'use.py','work',3)['definition']['path'],'use.py')
+        self.assertIsNone(self.reference(repo,'use.py','work',4)['definition'])
+        self.assertEqual(self.reference(repo,'use.py','work',6)['definition']['line'],5)
+
+    def test_cyclic_reexport_and_external_import_are_unresolved(self):
+        repo=self.index({'a.py':'from b import missing\n', 'b.py':'from a import missing\n', 'use.py':'from a import missing\nimport external\nmissing()\nexternal.work()\n'})
+        self.assertIsNone(self.reference(repo,'use.py','missing',3)['definition'])
+        self.assertIsNone(self.reference(repo,'use.py','work',4)['definition'])
+
+    def test_utf16_attribute_position_and_multiline_imports(self):
+        repo=self.index({'lib.py':'def café(): pass\n', 'use.py':'from lib import (\n    café as coffee,\n)\nimport lib\ndef run():\n    label = "🌲"; lib.café()\n'})
+        original=self.reference(repo,'use.py','café',2)
+        self.assertEqual(original['column'],4)
+        attribute=self.reference(repo,'use.py','café',6)
+        self.assertEqual(attribute['column'],22)
+        self.assertEqual(attribute['definition']['path'],'lib.py')
+
+
 if __name__ == '__main__': unittest.main(verbosity=2)
