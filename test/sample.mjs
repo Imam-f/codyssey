@@ -3,7 +3,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 const result = JSON.parse(
   execFileSync(
     "uv",
-    ["run", "--no-project", "--script", "backend/analyzer.py", "sample"],
+    ["run", "--no-project", "--script", "backend/analyzer.py", "test/sample"],
     { encoding: "utf8", windowsHide: true },
   ),
 );

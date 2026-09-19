@@ -19,11 +19,15 @@ import SourceView from "./components/SourceView";
 import Inspector from "./components/Inspector";
 import CommandPalette from "./components/CommandPalette";
 import StatusBar from "./components/StatusBar";
+import Welcome from "./components/Welcome";
 
 function App() {
   const [repo, setRepo] = useState(null),
-    [busy, setBusy] = useState(true),
+    [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [recent, setRecent] = useState([]),
+    [recentLoading, setRecentLoading] = useState(true);
+  const loadingRef = useRef(false);
   const [callFocus, setCallFocus] = useState(null);
   const [activeReference, setActiveReference] = useState(null);
   const [path, setPath] = useState(""),
@@ -49,7 +53,9 @@ function App() {
     [inspectorWidth, setInspectorWidth] = useState(284),
     [bottomHeight, setBottomHeight] = useState(226);
   const codeRef = useRef(null),
-    findRef = useRef(null);
+    findRef = useRef(null),
+    tabStateRef = useRef({}),
+    pendingScrollRef = useRef(null);
   const file = repo?.files.find((f) => f.path === path);
   const referencesByLine = useMemo(() => {
     const map = new Map();
@@ -110,15 +116,28 @@ function App() {
   const aliases = file?.aliases || [];
   const diagnostics = repo?.diagnostics || [];
 
-  async function load(method) {
+  async function load(method, ...args) {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setBusy(true);
     setError("");
     try {
-      const data = await api[method]();
+      const data = await api[method](...args);
       if (!data) return;
       setRepo(data);
+      setNotice("");
+      setPalette(false);
+      if (method !== "refresh") {
+        setView("source");
+        setInspector("symbol");
+        setBottom("references");
+        setFileQuery("");
+        setSymbolQuery("");
+      }
       setActiveReference(null);
       setCallFocus(null);
+      tabStateRef.current = {};
+      pendingScrollRef.current = null;
       const next =
         data.files.find((f) => f.path === path) ||
         data.files.find((f) => f.path.endsWith("service.py")) ||
@@ -133,18 +152,68 @@ function App() {
       setLine(initial?.line || 1);
       setHistory([]);
       setHistoryIndex(-1);
+      setRecent(await api.recent());
     } catch (e) {
       setError(e.message);
     } finally {
+      loadingRef.current = false;
       setBusy(false);
     }
   }
+  async function closeRepository() {
+    if (loadingRef.current) return;
+    try {
+      await api.close();
+      setRepo(null);
+      setPath("");
+      setSelectedId(null);
+      setActiveReference(null);
+      setCallFocus(null);
+      setTabs([]);
+      setHistory([]);
+      setHistoryIndex(-1);
+      setPalette(false);
+      setError("");
+      setNotice("");
+      tabStateRef.current = {};
+      pendingScrollRef.current = null;
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function removeRecent(root) {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setBusy(true);
+    try {
+      setRecent(await api.removeRecent(root));
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      loadingRef.current = false;
+      setBusy(false);
+    }
+  }
+  async function openInVSCode() {
+    try {
+      await api.openInVSCode();
+      setNotice("Repository sent to VS Code");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
   useEffect(() => {
-    load("sample");
+    api.recent()
+      .then(setRecent)
+      .catch((e) => setError(e.message))
+      .finally(() => setRecentLoading(false));
   }, []);
   useEffect(() => {
     let canceled = false;
     setTokens([]);
+    setHighlightReady(false);
+    setHighlightError("");
     if (file)
       initHighlighter()
         .then((highlight) => {
@@ -161,9 +230,14 @@ function App() {
     };
   }, [file]);
   useEffect(() => {
-    codeRef.current
-      ?.querySelector(`[data-line="${line}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    const el = codeRef.current;
+    if (!el) return;
+    if (pendingScrollRef.current != null) {
+      el.scrollTop = pendingScrollRef.current;
+      pendingScrollRef.current = null;
+      return;
+    }
+    el.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "nearest" });
   }, [line, path, tokens, view]);
   useEffect(() => {
     if (notice) {
@@ -172,14 +246,44 @@ function App() {
     }
   }, [notice]);
 
+  function saveTabState() {
+    if (!path) return;
+    const prev = tabStateRef.current[path] || {};
+    tabStateRef.current[path] = {
+      line,
+      id: selectedId,
+      reference: activeReference,
+      scrollTop: codeRef.current
+        ? codeRef.current.scrollTop
+        : (prev.scrollTop ?? 0),
+    };
+  }
+  function clearTabState(p) {
+    delete tabStateRef.current[p];
+  }
+  function handleSourceScroll(e) {
+    const st = tabStateRef.current[path] || {
+      line,
+      id: selectedId,
+      reference: activeReference,
+    };
+    st.scrollTop = e.currentTarget.scrollTop;
+    tabStateRef.current[path] = st;
+  }
+
   function navigate(target, remember = true, origin = null) {
     if (!target) return;
+    saveTabState();
+    const switching =
+      !target.line && !target.id && !target.symbolId && !target.reference;
+    const saved = switching ? tabStateRef.current[target.path || path] : null;
     const dest = {
       path: target.path || path,
-      line: target.line || 1,
-      id: target.id || target.symbolId || null,
-      reference: target.reference || null,
+      line: (switching && saved?.line) || target.line || 1,
+      id: (switching && saved?.id) || target.id || target.symbolId || null,
+      reference: (switching && saved?.reference) || target.reference || null,
     };
+    if (switching && saved) pendingScrollRef.current = saved.scrollTop;
     if (remember) {
       const next = history.slice(0, historyIndex + 1);
       next.push(
@@ -233,7 +337,7 @@ function App() {
   }
   useEffect(() => {
     const keydown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+      if (repo && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setPalette((v) => !v);
         setPaletteQuery("");
@@ -242,21 +346,21 @@ function App() {
         e.preventDefault();
         if (!busy) load("open");
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      if (repo && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setView("source");
         setBottom("symbols");
         requestAnimationFrame(() => findRef.current?.focus());
       }
       if (e.key === "Escape") setPalette(false);
-      if (e.key === "F12") {
+      if (repo && e.key === "F12") {
         e.preventDefault();
         if (e.ctrlKey) jumpType();
         else goToDefinition();
       }
       if (e.key === "F5") {
         e.preventDefault();
-        if (!busy) load("refresh");
+        if (!busy && repo) load("refresh");
       }
     };
     window.addEventListener("keydown", keydown);
@@ -274,7 +378,20 @@ function App() {
         onExport={exportReport}
         onPalette={() => setPalette(true)}
         onDismissError={() => setError("")}
+        onClose={closeRepository}
+        onOpenInVSCode={openInVSCode}
       />
+      {!repo ? (
+        <Welcome
+          busy={busy}
+          recent={recent}
+          recentLoading={recentLoading}
+          onOpen={() => load("open")}
+          onSample={() => load("sample")}
+          onOpenRecent={(root) => load("openRecent", root)}
+          onRemoveRecent={removeRecent}
+        />
+      ) : (
       <div className="workspace">
         {sidebar && (
           <Sidebar
@@ -342,7 +459,10 @@ function App() {
               )}
             </button>
           </div>
-          {view === "source" ? (
+          <div
+            className="view-pane"
+            style={{ display: view === "source" ? undefined : "none" }}
+          >
             <SourceView
               file={file}
               path={path}
@@ -379,19 +499,33 @@ function App() {
               setBottomHeight={setBottomHeight}
               load={load}
               busy={busy}
+              onScroll={handleSourceScroll}
+              clearTabState={clearTabState}
             />
-          ) : view === "classes" ? (
+          </div>
+          <div
+            className="view-pane"
+            style={{ display: view === "classes" ? undefined : "none" }}
+          >
             <ClassTracker classes={classes} onNavigate={navigate} />
-          ) : view === "calls" ? (
+          </div>
+          <div
+            className="view-pane"
+            style={{ display: view === "calls" ? undefined : "none" }}
+          >
             <CallGraph
               graph={repo?.callGraph}
               focusId={callFocus}
               onFocus={focusCall}
               onNavigate={navigate}
             />
-          ) : (
+          </div>
+          <div
+            className="view-pane"
+            style={{ display: view === "graph" ? undefined : "none" }}
+          >
             <InheritanceGraph classes={classes} onNavigate={navigate} />
-          )}
+          </div>
         </main>
         <Resizer
           orientation="vertical"
@@ -416,14 +550,17 @@ function App() {
           path={path}
         />
       </div>
+      )}
       <StatusBar
+        repo={repo}
+        file={file}
         diagnostics={diagnostics}
         notice={notice}
         highlightError={highlightError}
         highlightReady={highlightReady}
         line={line}
       />
-      {palette && (
+      {palette && repo && (
         <CommandPalette
           repo={repo}
           symbols={symbols}

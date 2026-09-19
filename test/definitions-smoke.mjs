@@ -21,17 +21,18 @@ await writeFile(
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.CODYSSEY_DEV_URL;
+const profile = await mkdtemp(path.join(tmpdir(), "codyssey-definitions-profile-"));
 const app = await electron.launch({
   ...(process.env.CODYSSEY_EXECUTABLE
-    ? { executablePath: process.env.CODYSSEY_EXECUTABLE, args: [] }
-    : { args: ["."] }),
+    ? { executablePath: process.env.CODYSSEY_EXECUTABLE, args: [`--user-data-dir=${profile}`] }
+    : { args: [".", `--user-data-dir=${profile}`] }),
   env,
 });
 try {
   const page = await app.firstWindow();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.getByText("Indexed", { exact: true }).waitFor({ timeout: 60000 });
+  await page.getByRole("heading", { name: "Start exploring" }).waitFor();
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({
       canceled: false,

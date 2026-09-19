@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Search,
   Box,
@@ -13,7 +13,7 @@ import { basename } from "../util";
 
 export default function InheritanceGraph({ classes, onNavigate }) {
   const [query, setQuery] = useState(""),
-    [zoom, setZoom] = useState(1),
+    [view, setView] = useState({ x: 0, y: 0, k: 1 }),
     [focus, setFocus] = useState(null);
   const canvasRef = useRef(null);
   const drag = useRef(null);
@@ -111,12 +111,11 @@ export default function InheritanceGraph({ classes, onNavigate }) {
 
   function onPointerDown(e) {
     if (e.target.closest("button, a, input, label")) return;
-    const el = canvasRef.current;
     drag.current = {
-      x: e.clientX,
-      y: e.clientY,
-      sl: el.scrollLeft,
-      st: el.scrollTop,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: view.x,
+      y: view.y,
       id: e.pointerId,
     };
     try {
@@ -126,9 +125,11 @@ export default function InheritanceGraph({ classes, onNavigate }) {
   function onPointerMove(e) {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
-    const el = canvasRef.current;
-    el.scrollLeft = d.sl - (e.clientX - d.x);
-    el.scrollTop = d.st - (e.clientY - d.y);
+    setView((v) => ({
+      ...v,
+      x: d.x + (e.clientX - d.startX),
+      y: d.y + (e.clientY - d.startY),
+    }));
   }
   function onPointerUp(e) {
     if (drag.current?.id !== e.pointerId) return;
@@ -136,6 +137,40 @@ export default function InheritanceGraph({ classes, onNavigate }) {
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
     } catch {}
+  }
+
+  const clampZoom = (k) => Math.min(Math.max(k, 0.25), 2.5);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const rect = el.getBoundingClientRect();
+      setView((v) => {
+        const k = clampZoom(v.k * factor);
+        const ox = e.clientX - rect.left;
+        const oy = e.clientY - rect.top;
+        const wx = (ox - v.x) / v.k;
+        const wy = (oy - v.y) / v.k;
+        return { k, x: ox - wx * k, y: oy - wy * k };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  function setZoom(next) {
+    const k = clampZoom(next);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const ox = rect ? rect.width / 2 : 0;
+    const oy = rect ? rect.height / 2 : 0;
+    setView((v) => {
+      const wx = (ox - v.x) / v.k;
+      const wy = (oy - v.y) / v.k;
+      return { k, x: ox - wx * k, y: oy - wy * k };
+    });
   }
 
   return (
@@ -170,49 +205,42 @@ export default function InheritanceGraph({ classes, onNavigate }) {
         onPointerCancel={onPointerUp}
       >
         <div
+          className="graph-inner"
           style={{
-            width: graph.width * zoom,
-            height: graph.height * zoom,
-            minWidth: "100%",
+            width: graph.width,
+            height: graph.height,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
           }}
         >
-          <div
-            className="graph-inner"
-            style={{
-              width: graph.width,
-              height: graph.height,
-              transform: `scale(${zoom})`,
-            }}
-          >
-            <svg width={graph.width} height={graph.height}>
-              <defs>
-                <marker
-                  id="arrow"
-                  markerWidth="8"
-                  markerHeight="8"
-                  refX="8"
-                  refY="4"
-                  orient="auto"
-                >
-                  <path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#8e9bab" />
-                </marker>
-              </defs>
-              {graph.edges.map((edge, i) => {
-                const from = graph.map.get(edge.from),
-                  to = graph.map.get(edge.to);
-                return (
-                  <path
-                    key={i}
-                    d={`M ${to.x + 100} ${to.y} C ${to.x + 100} ${to.y - 40}, ${from.x + 100} ${from.y + 135}, ${from.x + 100} ${from.y + 95}`}
-                    fill="none"
-                    stroke="#52616c"
-                    strokeWidth="1.3"
-                    markerEnd="url(#arrow)"
-                  />
-                );
-              })}
-            </svg>
-            {graph.nodes.map((node) => (
+          <svg width={graph.width} height={graph.height}>
+            <defs>
+              <marker
+                id="arrow"
+                markerWidth="8"
+                markerHeight="8"
+                refX="8"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#8e9bab" />
+              </marker>
+            </defs>
+            {graph.edges.map((edge, i) => {
+              const from = graph.map.get(edge.from),
+                to = graph.map.get(edge.to);
+              return (
+                <path
+                  key={i}
+                  d={`M ${to.x + 100} ${to.y} C ${to.x + 100} ${to.y - 40}, ${from.x + 100} ${from.y + 135}, ${from.x + 100} ${from.y + 95}`}
+                  fill="none"
+                  stroke="#52616c"
+                  strokeWidth="1.3"
+                  markerEnd="url(#arrow)"
+                />
+              );
+            })}
+          </svg>
+          {graph.nodes.map((node) => (
               <div
                 key={node.id}
                 className={`graph-node ${node.external ? "external" : ""} ${focus === node.id ? "focused" : ""}`}
@@ -244,7 +272,6 @@ export default function InheritanceGraph({ classes, onNavigate }) {
               </div>
             ))}
           </div>
-        </div>
         {!graph.nodes.length && (
           <div className="empty">No matching classes.</div>
         )}
@@ -265,21 +292,21 @@ export default function InheritanceGraph({ classes, onNavigate }) {
           )}
           <button
             title="Zoom out"
-            onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
+            onClick={() => setZoom(view.k / 1.12)}
           >
             <Minus size={14} />
           </button>
-          <span>{Math.round(zoom * 100)}%</span>
+          <span>{Math.round(view.k * 100)}%</span>
           <button
             title="Zoom in"
-            onClick={() => setZoom((z) => Math.min(1.6, z + 0.1))}
+            onClick={() => setZoom(view.k * 1.12)}
           >
             <Plus size={14} />
           </button>
           <button
             title="Reset zoom"
             onClick={() => {
-              setZoom(1);
+              setView({ x: 0, y: 0, k: 1 });
               setQuery("");
               setFocus(null);
             }}

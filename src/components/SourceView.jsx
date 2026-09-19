@@ -51,8 +51,11 @@ export default function SourceView({
   setBottomHeight,
   load,
   busy,
+  onScroll,
+  clearTabState,
 }) {
   const closeTab = (tab) => {
+    clearTabState(tab);
     const next = tabs.filter((t) => t !== tab);
     setTabs(next);
     if (path === tab) {
@@ -116,7 +119,7 @@ export default function SourceView({
         )}
         <span className="breadcrumb-end">{file?.lines || 0} lines</span>
       </div>
-      <div className="source-area" ref={codeRef}>
+      <div className="source-area" ref={codeRef} onScroll={onScroll}>
         {!file ? (
           <div className="welcome">
             <Code2 size={30} />

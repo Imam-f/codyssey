@@ -1,4 +1,8 @@
 import { Box, Braces, ArrowUpRight, Variable } from "lucide-react";
+import { version } from "../package.json";
+
+export const appVersion = version;
+export const isDesktop = Boolean(window.codyssey);
 
 export const Icon = ({ kind, size = 13 }) =>
   kind === "class" ? (
@@ -28,6 +32,13 @@ export const api = window.codyssey || {
     );
   },
   refresh: () => api.sample(),
+  recent: async () => [],
+  openRecent: async () => api.open(),
+  removeRecent: async () => [],
+  close: async () => {},
+  openInVSCode: async () => {
+    throw new Error("Open in VS Code is available in the Electron desktop app.");
+  },
   export: async (data) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(

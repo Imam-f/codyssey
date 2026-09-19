@@ -2,9 +2,13 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# The backend is also run as a standalone script, with sibling module imports.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from analyzer import analyze
 
 

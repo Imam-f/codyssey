@@ -7,16 +7,18 @@ import path from "node:path";
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.CODYSSEY_DEV_URL;
+const profile = await mkdtemp(path.join(tmpdir(), "codyssey-smoke-profile-"));
 const app = await electron.launch({
   ...(process.env.CODYSSEY_EXECUTABLE
-    ? { executablePath: process.env.CODYSSEY_EXECUTABLE, args: [] }
-    : { args: ["."] }),
+    ? { executablePath: process.env.CODYSSEY_EXECUTABLE, args: [`--user-data-dir=${profile}`] }
+    : { args: [".", `--user-data-dir=${profile}`] }),
   env,
 });
 try {
   const page = await app.firstWindow();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.getByRole("button", { name: /Explore the sample/ }).click();
   await page.getByText("Indexed", { exact: true }).waitFor({ timeout: 60000 });
   await page
     .locator(".statusbar")
@@ -95,6 +97,13 @@ try {
   await page.getByRole("textbox", { name: "Find class" }).fill("");
   await mkdir("artifacts", { recursive: true });
   await page.screenshot({ path: "artifacts/inheritance.png" });
+  await page.getByRole("button", { name: "Class tracker", exact: true }).click();
+  assert.equal((await page.locator(".class-member-group").count()) > 0, true);
+  await page
+    .getByRole("textbox", { name: "Find tracked class or member" })
+    .fill("save");
+  assert.equal((await page.locator(".class-tracker-list > button").count()) >= 3, true);
+  await page.getByRole("button", { name: "Inheritance", exact: false }).click();
   await page
     .locator(".graph-node-title")
     .filter({ hasText: "UserService" })

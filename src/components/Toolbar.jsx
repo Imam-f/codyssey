@@ -6,8 +6,11 @@ import {
   RefreshCw,
   Download,
   CircleAlert,
+  ExternalLink,
+  House,
   X,
 } from "lucide-react";
+import { appVersion, isDesktop } from "../util";
 
 export default function Toolbar({
   repo,
@@ -18,6 +21,8 @@ export default function Toolbar({
   onExport,
   onPalette,
   onDismissError,
+  onClose,
+  onOpenInVSCode,
 }) {
   return (
     <>
@@ -26,7 +31,7 @@ export default function Toolbar({
           <span className="brand-mark">
             <Code2 size={19} />
           </span>
-          codyssey<span className="version">PYTHON</span>
+          codyssey<span className="version">v{appVersion}</span>
         </div>
         <div className="toolbar-divider" />
         <button
@@ -39,12 +44,34 @@ export default function Toolbar({
           <span>{repo?.name || "Open repository"}</span>
           <ChevronDown size={12} />
         </button>
-        <button className="quick-open" onClick={onPalette}>
+        {repo && (
+          <button
+            onClick={onClose}
+            disabled={busy}
+            title="Close repository and return to welcome"
+            aria-label="Close repository"
+          >
+            <House size={15} />
+          </button>
+        )}
+        <button className="quick-open" onClick={onPalette} disabled={!repo}>
           <Search size={14} />
           <span>Go to file or symbol…</span>
           <kbd>Ctrl P</kbd>
         </button>
         <div className="toolbar-actions">
+          {repo && (
+            <button
+              onClick={onOpenInVSCode}
+              disabled={busy || !isDesktop}
+              title={isDesktop
+                ? "Open repository in a new Visual Studio Code window"
+                : "Available in the desktop app"}
+              aria-label="Open in VS Code"
+            >
+              <ExternalLink size={15} /><span>VS Code</span>
+            </button>
+          )}
           <button
             onClick={onRefresh}
             disabled={busy || !repo}
@@ -59,9 +86,9 @@ export default function Toolbar({
           >
             <Download size={15} />
           </button>
-          <span className="indexed">
-            <i className={busy ? "busy-dot" : ""} />
-            {busy ? "Indexing" : "Indexed"}
+          <span className="indexed" role="status">
+            <i className={busy ? "busy-dot" : !repo ? "idle-dot" : ""} />
+            {busy ? "Indexing" : repo ? "Indexed" : "Ready"}
           </span>
         </div>
       </header>

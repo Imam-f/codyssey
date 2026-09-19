@@ -185,6 +185,9 @@ i {
 .busy-dot {
   background: #d4b775;
 }
+.idle-dot {
+  background: var(--muted);
+}
 .workspace {
   display: flex;
   flex: 1;
@@ -399,6 +402,12 @@ i {
   right: 10px;
   height: 2px;
   background: var(--accent);
+}
+.view-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .count {
   background: #262c34;

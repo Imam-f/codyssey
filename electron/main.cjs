@@ -1,10 +1,55 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 let window, currentRoot, activeProcess;
+let recentRepositories = [];
 const resources = () =>
   app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
+const recentFile = () => path.join(app.getPath("userData"), "recent-repositories.json");
+const rootKey = (root) => process.platform === "win32" ? root.toLowerCase() : root;
+async function readRecentRepositories() {
+  try {
+    const data = JSON.parse(await fs.readFile(recentFile(), "utf8"));
+    const seen = new Set();
+    recentRepositories = (Array.isArray(data) ? data : []).filter((entry) => {
+      if (!entry || typeof entry.root !== "string" || !path.isAbsolute(entry.root) ||
+          typeof entry.name !== "string" || typeof entry.lastOpened !== "string" ||
+          !Number.isFinite(Date.parse(entry.lastOpened)) || seen.has(rootKey(entry.root)))
+        return false;
+      seen.add(rootKey(entry.root));
+      return true;
+    }).slice(0, 10);
+  } catch (error) {
+    if (error.code !== "ENOENT") console.warn("Could not read recent repositories:", error.message);
+  }
+}
+async function saveRecentRepositories(next) {
+  await fs.mkdir(app.getPath("userData"), { recursive: true });
+  await fs.writeFile(`${recentFile()}.tmp`, JSON.stringify(next, null, 2), "utf8");
+  await fs.rename(`${recentFile()}.tmp`, recentFile());
+  recentRepositories = next;
+  return recentRepositories;
+}
+async function openRepository(root, remember = true) {
+  let directory;
+  try {
+    directory = await fs.realpath(root);
+    if (!(await fs.stat(directory)).isDirectory()) throw new Error("Not a directory");
+  } catch {
+    throw new Error("This repository folder is unavailable. Choose another folder or remove it from recent repositories.");
+  }
+  const result = await analyze(directory);
+  if (remember) {
+    await saveRecentRepositories([
+      { root: directory, name: result.name, lastOpened: new Date().toISOString() },
+      ...recentRepositories.filter((entry) => rootKey(entry.root) !== rootKey(directory)),
+    ].slice(0, 10));
+  }
+  currentRoot = directory;
+  return result;
+}
 function analyze(root) {
   return new Promise((resolve, reject) => {
     if (activeProcess)
@@ -62,7 +107,6 @@ function analyze(root) {
         const result = JSON.parse(out);
         if (code !== 0 || result.error)
           throw new Error(result.error || err || "Analysis timed out.");
-        currentRoot = root;
         resolve(result);
       } catch (error) {
         reject(
@@ -76,7 +120,8 @@ function analyze(root) {
     });
   });
 }
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await readRecentRepositories();
   window = new BrowserWindow({
     width: 1520,
     height: 960,
@@ -110,9 +155,37 @@ app.whenReady().then(() => {
       properties: ["openDirectory"],
       title: "Open Python repository",
     });
-    return result.canceled ? null : analyze(result.filePaths[0]);
+    return result.canceled ? null : openRepository(result.filePaths[0]);
   });
-  handle("repo:sample", () => analyze(path.join(resources(), "sample")));
+  handle("repo:sample", () =>
+    openRepository(path.join(resources(), app.isPackaged ? "sample" : "test/sample"), false),
+  );
+  handle("repo:recent", () => recentRepositories);
+  handle("repo:open-recent", (root) => {
+    const entry = recentRepositories.find((item) => item.root === root);
+    if (!entry) throw new Error("Repository is no longer in the recent list.");
+    return openRepository(entry.root);
+  });
+  handle("repo:remove-recent", (root) =>
+    saveRecentRepositories(recentRepositories.filter((entry) => entry.root !== root)),
+  );
+  handle("repo:close", () => {
+    if (activeProcess) throw new Error("Wait for indexing to finish before closing the repository.");
+    currentRoot = null;
+  });
+  handle("repo:open-in-vscode", async () => {
+    if (!currentRoot) throw new Error("Open a repository first.");
+    const url = pathToFileURL(currentRoot);
+    try {
+      // Force a new window instead of replacing another repository's workspace.
+      await shell.openExternal(
+        `vscode://file${url.host ? `//${url.host}` : ""}${url.pathname}?windowId=_blank`,
+      );
+    } catch {
+      throw new Error("Could not open VS Code. Make sure Visual Studio Code is installed and its vscode:// links are enabled.");
+    }
+    return true;
+  });
   handle("repo:refresh", () => {
     if (!currentRoot) throw new Error("Open a repository first.");
     return analyze(currentRoot);

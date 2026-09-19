@@ -1,6 +1,7 @@
 {
   "name": "codyssey",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "a developer tool where you anger the gods and commit atrocities against humanity",
@@ -8,12 +9,13 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1",
-    "build": "node scripts/sample.mjs && vite build",
-    "sample": "node scripts/sample.mjs",
+    "build": "node test/sample.mjs && vite build",
+    "sample": "node test/sample.mjs",
     "start": "electron .",
-    "test": "uv run --script backend/test_analyzer.py",
-    "test:ui": "node scripts/smoke.mjs",
-    "test:definitions": "node scripts/definitions-smoke.mjs",
+    "test": "uv run --script test/test_analyzer.py",
+    "test:ui": "node test/smoke.mjs",
+    "test:definitions": "node test/definitions-smoke.mjs",
+    "test:welcome": "node test/welcome-smoke.mjs",
     "postinstall": "node scripts/assets.mjs",
     "pack": "npm run build && electron-builder --dir"
   },
@@ -40,6 +42,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "LICENSE",
       "package.json"
     ],
     "extraResources": [
@@ -54,7 +57,7 @@
         ]
       },
       {
-        "from": "sample",
+        "from": "test/sample",
         "to": "sample"
       }
     ],
