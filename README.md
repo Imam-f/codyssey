@@ -1,14 +1,14 @@
 # Codyssey
 
-**v0.1.0** · [MIT License](LICENSE)
+**v0.2.0** · [MIT License](LICENSE)
 
 > A developer tool where you anger the gods and commit atrocities against humanity
 
-A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a file explorer and outline, Tree-sitter source viewer, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph.
+A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph.
 
 ## Download
 
-[Download Codyssey v0.1.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.1.0/Codyssey-0.1.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.1.0)
+[Download Codyssey v0.2.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.2.0/Codyssey-0.2.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.2.0)
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure it is on PATH, then launch the portable `.exe`. No app installation or Node.js setup is needed; `uv` selects or installs Python 3.12+ for analysis.
 
@@ -19,6 +19,12 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure
 Open a Python repository, return to a recent project, or explore the bundled sample.
 
 ![Codyssey welcome page with repository-opening actions and a recent repositories section](docs/screenshots/welcome.png)
+
+### Overview
+
+See lines of code and top-level symbol counts per file, with sortable columns and file filtering.
+
+![Codyssey Overview tab showing per-file line and symbol metrics with filtering](docs/screenshots/overview.png)
 
 ### Source explorer
 
@@ -67,6 +73,7 @@ The packaged application also requires `uv` on PATH. All highlighting assets are
 ## Navigation
 
 - **Open in VS Code** (the toolbar's **VS Code** button) opens the current repository in a new Visual Studio Code window using its `vscode://` handler, preserving workspaces already open in other windows. Visual Studio Code must be installed with that handler enabled.
+- **Overview** lists every indexed file with its line count and top-level symbol counts, with sortable columns and file filtering. Click a row to open that file.
 
 - Click a source identifier to inspect its declaration, type, and usages. Matching occurrences are highlighted. **Ctrl+click**, double-click, or **F12** follows its definition, including imports, package re-exports, qualified module members, and statically known methods in other indexed files. The inspector keeps the local import declaration and shows a separate definition link. Back restores the original source location. Unresolved targets show a message rather than jumping to another symbol.
 - Follow a type link in the inspector, or press **Ctrl+F12**, to open its indexed definition. Built-in and unresolved external types have no definition link.

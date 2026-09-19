@@ -33,6 +33,17 @@ try {
   assert.equal(await page.locator(".reference-row").count(), 5);
   await page
     .locator(".view-tabs")
+    .getByRole("button", { name: /Overview/ })
+    .click();
+  assert.equal(
+    (await page.locator(".overview-table tbody tr").count()) >= 5,
+    true,
+    "Overview lists the sample files with metrics",
+  );
+  await mkdir("artifacts", { recursive: true });
+  await page.screenshot({ path: "artifacts/overview.png" });
+  await page
+    .locator(".view-tabs")
     .getByRole("button", { name: /Call graph/ })
     .click();
   assert.match(
@@ -132,7 +143,7 @@ try {
   await page
     .getByRole("button", { name: "Variables & symbols", exact: false })
     .click();
-  assert.equal((await page.locator("tbody tr").count()) >= 5, true);
+  assert.equal((await page.locator(".bottom-content tbody tr").count()) >= 5, true);
   await page.getByRole("button", { name: "Problems", exact: false }).click();
   await page.getByText("No parse errors in indexed files.").waitFor();
   await page.getByRole("button", { name: "Re-index repository · F5" }).click();
@@ -158,7 +169,7 @@ try {
   await page.locator(".tree-file").click();
   await page.keyboard.press("Control+f");
   await page.getByRole("textbox", { name: "Filter symbols" }).fill("result");
-  assert.equal(await page.locator("tbody tr").count(), 1);
+  assert.equal(await page.locator(".bottom-content tbody tr").count(), 1);
   const report = path.join(fixture, "report.json");
   await app.evaluate(({ dialog }, reportPath) => {
     dialog.showSaveDialog = async () => ({

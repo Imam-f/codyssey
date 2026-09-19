@@ -156,21 +156,29 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
       const k = viewRef.current.k || 1;
       const fr = flow.getBoundingClientRect();
       const rects = {};
+      let maxRight = 0;
+      let maxBottom = 0;
       flow.querySelectorAll(".call-node").forEach((el) => {
         const id = el.dataset.nodeId;
         const side = el.dataset.side;
         if (!id || !side) return;
         const r = el.getBoundingClientRect();
-        rects[`${side}:${id}`] = {
+        const rect = {
           left: (r.left - fr.left) / k,
           top: (r.top - fr.top) / k,
           right: (r.right - fr.left) / k,
           bottom: (r.bottom - fr.top) / k,
           centerY: (r.top - fr.top + r.height / 2) / k,
         };
+        rects[`${side}:${id}`] = rect;
+        if (rect.right > maxRight) maxRight = rect.right;
+        if (rect.bottom > maxBottom) maxBottom = rect.bottom;
       });
       setNodeRects(rects);
-      setFlowSize({ width: flow.offsetWidth, height: flow.offsetHeight });
+      setFlowSize({
+        width: Math.max(flow.offsetWidth, maxRight + 18),
+        height: Math.max(flow.offsetHeight, maxBottom + 40),
+      });
     };
     measure();
     if (typeof ResizeObserver !== "undefined") {
