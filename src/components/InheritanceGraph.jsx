@@ -15,7 +15,8 @@ const NODE_W = 200;
 const NODE_H = 95;
 const GAP_X = 50;
 const GAP_Y = 60;
-const MAX_PER_LINE = 4;
+const MAX_PER_LINE = 6;
+const ASPECT_RATIO = 1.6;
 const PAD_X = 80;
 const TOP = 60;
 const CURVE = 40;
@@ -110,20 +111,19 @@ export default function InheritanceGraph({ classes, onNavigate }) {
       let w = NODE_W;
       let h = NODE_H;
       if (kids.length) {
-        const lines = [];
-        for (let i = 0; i < kids.length; i += MAX_PER_LINE)
-          lines.push(kids.slice(i, i + MAX_PER_LINE));
-        for (const line of lines) {
-          let lw = 0;
-          for (const k of line) lw += measure(k).w + GAP_X;
-          w = Math.max(w, lw - GAP_X);
-        }
-        h = NODE_H + lines.length * GAP_Y;
-        for (const line of lines) {
-          let lh = 0;
-          for (const k of line) lh = Math.max(lh, measure(k).h);
-          h += lh;
-        }
+        const numCols = Math.min(MAX_PER_LINE, kids.length);
+        const colW = new Array(numCols).fill(0);
+        const colH = new Array(numCols).fill(0);
+        for (let c = 0; c < numCols; c++)
+          for (let i = c; i < kids.length; i += MAX_PER_LINE) {
+            const d = measure(kids[i]);
+            colW[c] = Math.max(colW[c], d.w);
+            colH[c] += d.h + GAP_Y;
+          }
+        w = 0;
+        for (let c = 0; c < numCols; c++) w += colW[c] + GAP_X;
+        w = Math.max(NODE_W, w - GAP_X);
+        h = NODE_H + Math.max(...colH);
       }
       placing.delete(id);
       size.set(id, { w, h });
@@ -136,22 +136,25 @@ export default function InheritanceGraph({ classes, onNavigate }) {
       node.y = y;
       const kids = ownedChildren.get(id) || [];
       if (!kids.length) return;
-      const lines = [];
-      for (let i = 0; i < kids.length; i += MAX_PER_LINE)
-        lines.push(kids.slice(i, i + MAX_PER_LINE));
-      let cy = y + NODE_H + GAP_Y;
-      for (const line of lines) {
-        let lw = 0;
-        for (const k of line) lw += size.get(k).w + GAP_X;
-        lw -= GAP_X;
-        let lx = x + (dim.w - lw) / 2;
-        for (const k of line) {
-          place(k, lx, cy);
-          lx += size.get(k).w + GAP_X;
+      const numCols = Math.min(MAX_PER_LINE, kids.length);
+      const colW = new Array(numCols).fill(0);
+      for (let c = 0; c < numCols; c++)
+        for (let i = c; i < kids.length; i += MAX_PER_LINE)
+          colW[c] = Math.max(colW[c], size.get(kids[i]).w);
+      const totalW =
+        colW.reduce((a, b) => a + b, 0) + (numCols - 1) * GAP_X;
+      let colX = x + (dim.w - totalW) / 2;
+      const top = y + NODE_H + GAP_Y;
+      for (let c = 0; c < numCols; c++) {
+        const cw = colW[c];
+        let cy = top;
+        for (let i = c; i < kids.length; i += MAX_PER_LINE) {
+          const kid = kids[i];
+          const kw = size.get(kid).w;
+          place(kid, colX + (cw - kw) / 2, cy);
+          cy += size.get(kid).h + GAP_Y;
         }
-        let lh = 0;
-        for (const k of line) lh = Math.max(lh, size.get(k).h);
-        cy += lh + GAP_Y;
+        colX += cw + GAP_X;
       }
     }
     const topLevel = [...roots];
@@ -161,10 +164,25 @@ export default function InheritanceGraph({ classes, onNavigate }) {
         measure(id);
         topLevel.push(id);
       }
+    const area = topLevel.reduce((a, id) => {
+      const d = size.get(id);
+      return a + (d.w + GAP_X) * (d.h + GAP_Y);
+    }, 0);
+    const targetWidth = Math.max(NODE_W, Math.sqrt(area * ASPECT_RATIO));
     let flowX = 0;
+    let flowY = TOP;
+    let rowH = 0;
     for (const id of topLevel) {
-      place(id, flowX, TOP);
-      flowX += size.get(id).w + GAP_X;
+      const w = size.get(id).w;
+      const h = size.get(id).h;
+      if (flowX > 0 && flowX + w > targetWidth) {
+        flowX = 0;
+        flowY += rowH + GAP_Y;
+        rowH = 0;
+      }
+      place(id, flowX, flowY);
+      flowX += w + GAP_X;
+      rowH = Math.max(rowH, h);
     }
     let minX = Infinity,
       maxX = -Infinity,
@@ -243,16 +261,7 @@ export default function InheritanceGraph({ classes, onNavigate }) {
 
   useEffect(() => {
     if (!pin) return;
-    const el = canvasRef.current;
-    const node = graph.nodes.find((n) => n.id === pin);
-    if (!el || !node) return;
-    const rect = el.getBoundingClientRect();
-    const k = view.k;
-    setView({
-      k,
-      x: rect.width / 2 - (node.x + NODE_W / 2) * k,
-      y: rect.height / 2 - (node.y + NODE_H / 2) * k,
-    });
+    fitView();
   }, [pin]);
 
   function setZoom(next) {

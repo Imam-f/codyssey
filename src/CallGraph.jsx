@@ -138,7 +138,7 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
   viewRef.current = view;
   const drag = useRef(null);
 
-  const clampZoom = (k) => Math.min(Math.max(k, 0.25), 2.5);
+  const clampZoom = (k) => Math.min(Math.max(k, 0.05), 2.5);
 
   useLayoutEffect(() => {
     const flow = flowRef.current;
@@ -200,6 +200,23 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
       const wx = (ox - v.x) / v.k;
       const wy = (oy - v.y) / v.k;
       return { k, x: ox - wx * k, y: oy - wy * k };
+    });
+  }
+
+  function fitView() {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || !flowSize.width || !flowSize.height) return;
+    const pad = 24;
+    const k = clampZoom(
+      Math.min(
+        (rect.width - pad * 2) / flowSize.width,
+        (rect.height - pad * 2) / flowSize.height,
+      ),
+    );
+    setView({
+      k,
+      x: (rect.width - flowSize.width * k) / 2,
+      y: (rect.height - flowSize.height * k) / 2,
     });
   }
 
@@ -518,7 +535,7 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
           <button title="Zoom in" onClick={() => setZoom(view.k * 1.12)}>
             <Plus size={14} />
           </button>
-          <button title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}>
+          <button title="Fit in view" onClick={fitView}>
             <Maximize2 size={14} />
           </button>
         </div>
