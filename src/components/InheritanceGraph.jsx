@@ -14,9 +14,7 @@ import { basename } from "../util";
 const NODE_W = 200;
 const NODE_H = 95;
 const GAP_X = 50;
-const LINE_GAP = 60;
-const GEN_GAP = 80;
-const FAN_GAP = 30;
+const GAP_Y = 60;
 const MAX_PER_LINE = 4;
 const PAD_X = 80;
 const TOP = 60;
@@ -79,78 +77,109 @@ export default function InheritanceGraph({ classes, onNavigate }) {
         }
       }
     }
-    const depthOf = (id, seen = new Set()) => {
-      if (seen.has(id)) return 0;
-      const next = new Set(seen).add(id);
-      return Math.max(
-        0,
-        ...edges
-          .filter((e) => e.to === id && visible.has(e.from))
-          .map((e) => depthOf(e.from, next) + 1),
-      );
-    };
-    const parentX = (node) => {
-      const parents = edges
-        .filter((e) => e.to === node.id)
-        .map((e) => nodes.get(e.from)?.x ?? 0);
-      return parents.reduce((a, b) => a + b, 0) / (parents.length || 1);
-    };
-    const levels = new Map();
-    let maxDepth = 0;
-    for (const node of nodes.values())
-      if (visible.has(node.id)) {
-        const d = depthOf(node.id);
-        if (d > maxDepth) maxDepth = d;
-        if (!levels.has(d)) levels.set(d, []);
-        levels.get(d).push(node);
+    const childrenOf = new Map();
+    const parentsOf = new Map();
+    for (const e of edges) {
+      if (!visible.has(e.from) || !visible.has(e.to)) continue;
+      if (!childrenOf.has(e.from)) childrenOf.set(e.from, []);
+      childrenOf.get(e.from).push(e.to);
+      if (!parentsOf.has(e.to)) parentsOf.set(e.to, []);
+      parentsOf.get(e.to).push(e.from);
+    }
+    // The first listed base "owns" a node for layout; secondary bases only
+    // draw an edge to it. This keeps each node placed exactly once.
+    const ownedChildren = new Map();
+    for (const [id, kids] of childrenOf) ownedChildren.set(id, [...kids]);
+    for (const [id, parents] of parentsOf)
+      for (const p of parents.slice(1)) {
+        const list = ownedChildren.get(p);
+        if (list) {
+          const idx = list.indexOf(id);
+          if (idx !== -1) list.splice(idx, 1);
+        }
       }
-    const linesByLevel = [];
-    for (let d = 0; d <= maxDepth; d++) {
-      const level = levels.get(d) || [];
-      level.sort((a, b) => parentX(a) - parentX(b));
+    const roots = [...visible].filter((id) => !parentsOf.has(id));
+
+    const size = new Map();
+    const placing = new Set();
+    function measure(id) {
+      if (size.has(id)) return size.get(id);
+      if (placing.has(id)) return { w: NODE_W, h: NODE_H };
+      placing.add(id);
+      const kids = ownedChildren.get(id) || [];
+      let w = NODE_W;
+      let h = NODE_H;
+      if (kids.length) {
+        const lines = [];
+        for (let i = 0; i < kids.length; i += MAX_PER_LINE)
+          lines.push(kids.slice(i, i + MAX_PER_LINE));
+        for (const line of lines) {
+          let lw = 0;
+          for (const k of line) lw += measure(k).w + GAP_X;
+          w = Math.max(w, lw - GAP_X);
+        }
+        h = NODE_H + lines.length * GAP_Y;
+        for (const line of lines) {
+          let lh = 0;
+          for (const k of line) lh = Math.max(lh, measure(k).h);
+          h += lh;
+        }
+      }
+      placing.delete(id);
+      size.set(id, { w, h });
+      return size.get(id);
+    }
+    function place(id, x, y) {
+      const dim = size.get(id) || { w: NODE_W, h: NODE_H };
+      const node = nodes.get(id);
+      node.x = x + (dim.w - NODE_W) / 2;
+      node.y = y;
+      const kids = ownedChildren.get(id) || [];
+      if (!kids.length) return;
       const lines = [];
-      for (let i = 0; i < level.length; i += MAX_PER_LINE)
-        lines.push(level.slice(i, i + MAX_PER_LINE));
-      linesByLevel.push(lines);
-      let flowX = 0;
+      for (let i = 0; i < kids.length; i += MAX_PER_LINE)
+        lines.push(kids.slice(i, i + MAX_PER_LINE));
+      let cy = y + NODE_H + GAP_Y;
       for (const line of lines) {
-        const w = line.length * NODE_W + (line.length - 1) * GAP_X;
-        const center =
-          d === 0
-            ? flowX + w / 2
-            : line.reduce((s, n) => s + parentX(n), 0) / line.length;
-        if (d === 0) flowX += w + GAP_X;
-        const start = center - w / 2;
-        line.forEach((n, i) => {
-          n.x = start + i * (NODE_W + GAP_X);
-        });
+        let lw = 0;
+        for (const k of line) lw += size.get(k).w + GAP_X;
+        lw -= GAP_X;
+        let lx = x + (dim.w - lw) / 2;
+        for (const k of line) {
+          place(k, lx, cy);
+          lx += size.get(k).w + GAP_X;
+        }
+        let lh = 0;
+        for (const k of line) lh = Math.max(lh, size.get(k).h);
+        cy += lh + GAP_Y;
       }
     }
+    const topLevel = [...roots];
+    for (const id of topLevel) measure(id);
+    for (const id of visible)
+      if (!size.has(id)) {
+        measure(id);
+        topLevel.push(id);
+      }
+    let flowX = 0;
+    for (const id of topLevel) {
+      place(id, flowX, TOP);
+      flowX += size.get(id).w + GAP_X;
+    }
     let minX = Infinity,
-      maxX = -Infinity;
+      maxX = -Infinity,
+      maxY = -Infinity;
     for (const node of nodes.values())
       if (visible.has(node.id)) {
         minX = Math.min(minX, node.x);
         maxX = Math.max(maxX, node.x + NODE_W);
+        maxY = Math.max(maxY, node.y + NODE_H);
       }
     const shift = PAD_X - minX;
     for (const node of nodes.values())
       if (visible.has(node.id)) node.x += shift;
     const width = Math.max(740, maxX + shift + PAD_X);
-    let yCursor = TOP;
-    let height = 450;
-    for (let d = 0; d <= maxDepth; d++) {
-      const lines = linesByLevel[d];
-      for (const line of lines) {
-        for (const n of line) {
-          n.y = yCursor;
-          height = Math.max(height, n.y + NODE_H + TOP);
-        }
-        yCursor += NODE_H + LINE_GAP;
-      }
-      const nextLines = linesByLevel[d + 1] || [];
-      yCursor += GEN_GAP + Math.max(0, nextLines.length - 1) * FAN_GAP;
-    }
+    const height = Math.max(450, maxY + TOP);
     return {
       nodes: [...nodes.values()].filter((n) => visible.has(n.id)),
       edges: edges.filter((e) => visible.has(e.from) && visible.has(e.to)),
