@@ -17,7 +17,8 @@
     "test:definitions": "node test/definitions-smoke.mjs",
     "test:welcome": "node test/welcome-smoke.mjs",
     "postinstall": "node scripts/assets.mjs",
-    "pack": "npm run build && electron-builder --dir"
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --win portable --x64 --publish never"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -62,7 +63,8 @@
       }
     ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "artifactName": "Codyssey-${version}-windows-${arch}.${ext}"
     }
   }
 }

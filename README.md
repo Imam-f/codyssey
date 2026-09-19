@@ -6,6 +6,12 @@
 
 A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a file explorer and outline, Tree-sitter source viewer, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph.
 
+## Download
+
+[Download Codyssey v0.1.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.1.0/Codyssey-0.1.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.1.0)
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure it is on PATH, then launch the portable `.exe`. No app installation or Node.js setup is needed; `uv` selects or installs Python 3.12+ for analysis.
+
 ## Screenshots
 
 ### Welcome page
@@ -19,6 +25,18 @@ Open a Python repository, return to a recent project, or explore the bundled sam
 Browse highlighted Python source alongside symbol details, types, and references.
 
 ![Codyssey source explorer showing the sample repository, a selected symbol, and its references](docs/screenshots/source.png)
+
+### Inheritance
+
+Explore class hierarchies, follow parent relationships, and jump to class definitions.
+
+![Codyssey Inheritance tab showing class hierarchies and their parent relationships](docs/screenshots/inheritance.png)
+
+### Call graph
+
+Trace callers and callees around a selected function, then navigate to definitions or call sites.
+
+![Codyssey Call graph tab showing the callers and callees of UserService.update_email](docs/screenshots/call-graph.png)
 
 ## Run
 
@@ -41,6 +59,7 @@ npm run test:ui   # Integration tests against the production Electron app
 npm run test:definitions  # Cross-file definition navigation tests
 npm run test:welcome      # Welcome, persistent recents, and VS Code integration tests
 npm run pack      # Unpacked desktop application under release/
+npm run dist      # Windows x64 portable executable under release/
 ```
 
 The packaged application also requires `uv` on PATH. All highlighting assets are bundled locally. `npm run dev:web` provides a browser preview with an explicit sample action after `npm run sample`; local folders, persistent recent repositories, and VS Code integration require Electron.
