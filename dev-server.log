@@ -1,0 +1,11 @@
+
+> codyssey@0.1.0 dev:web
+> vite --host 127.0.0.1
+
+[31merror when starting dev server:
+Error: Port 5173 is already in use
+    at httpServerStart (file:///C:/Users/User/Documents/Dev/experiment/codyssey/node_modules/vite/dist/node/chunks/node.js:14167:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async startServer (file:///C:/Users/User/Documents/Dev/experiment/codyssey/node_modules/vite/dist/node/chunks/node.js:24582:30)
+    at async Object.listen (file:///C:/Users/User/Documents/Dev/experiment/codyssey/node_modules/vite/dist/node/chunks/node.js:24396:4)
+    at async CAC.<anonymous> (file:///C:/Users/User/Documents/Dev/experiment/codyssey/node_modules/vite/dist/node/cli.js:725:3)[39m

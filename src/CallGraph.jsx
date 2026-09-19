@@ -260,8 +260,9 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
   }
 
   function arrowPath(from, to) {
-    const mid = (from.right + to.left) / 2;
-    return `M ${from.right} ${from.centerY} H ${mid} V ${to.centerY} H ${to.left}`;
+    const busY = flowSize.height - 20;
+    const hop = 10;
+    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${busY} H ${to.left - hop} V ${to.centerY} H ${to.left}`;
   }
 
   const arrows = [];

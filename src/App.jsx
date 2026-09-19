@@ -3,6 +3,7 @@ import {
   Box,
   FileCode2,
   GitBranch,
+  LayoutDashboard,
   ListTree,
   PanelLeftClose,
   PanelLeftOpen,
@@ -13,6 +14,7 @@ import { api, clamp } from "./util";
 import Resizer from "./components/Resizer";
 import InheritanceGraph from "./components/InheritanceGraph";
 import ClassTracker from "./components/ClassTracker";
+import Overview from "./components/Overview";
 import Toolbar from "./components/Toolbar";
 import Sidebar from "./components/Sidebar";
 import SourceView from "./components/SourceView";
@@ -416,6 +418,13 @@ function App() {
           <div className="view-bar">
             <div className="view-tabs">
               <button
+                className={view === "overview" ? "active" : ""}
+                onClick={() => setView("overview")}
+              >
+                <LayoutDashboard size={14} />
+                Overview
+              </button>
+              <button
                 className={view === "source" ? "active" : ""}
                 onClick={() => setView("source")}
               >
@@ -458,6 +467,12 @@ function App() {
                 <PanelLeftOpen size={15} />
               )}
             </button>
+          </div>
+          <div
+            className="view-pane"
+            style={{ display: view === "overview" ? undefined : "none" }}
+          >
+            <Overview repo={repo} onNavigate={navigate} />
           </div>
           <div
             className="view-pane"
