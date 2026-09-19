@@ -32,6 +32,11 @@ const Inspector = forwardRef(function Inspector(
   },
   ref,
 ) {
+  const classes = repo?.files?.flatMap((f) => f.classes) || [];
+  const targetClassId =
+    selected?.kind === "class" ? selected.id : selected?.typeTargets?.[0];
+  const targetClass = classes.find((c) => c.id === targetClassId);
+  const typeMembers = targetClass?.memberTracker?.members || [];
   return (
     <aside className="inspector" ref={ref} style={{ width: inspectorWidth }}>
       <div className="inspector-tabs">
@@ -46,6 +51,12 @@ const Inspector = forwardRef(function Inspector(
           onClick={() => setInspector("aliases")}
         >
           Aliases<span className="count">{aliases.length}</span>
+        </button>
+        <button
+          className={inspector === "type" ? "active" : ""}
+          onClick={() => setInspector("type")}
+        >
+          Type
         </button>
       </div>
       {inspector === "symbol" ? (
@@ -214,6 +225,14 @@ const Inspector = forwardRef(function Inspector(
             <p>Select a symbol in the source or outline.</p>
           </div>
         )
+      ) : inspector === "type" ? (
+        <TypeTab
+          selected={selected}
+          targetClass={targetClass}
+          typeMembers={typeMembers}
+          symbols={symbols}
+          navigate={navigate}
+        />
       ) : (
         <>
           <div className="alias-heading">
@@ -295,5 +314,91 @@ const Inspector = forwardRef(function Inspector(
     </aside>
   );
 });
+
+function TypeTab({ selected, targetClass, typeMembers, symbols, navigate }) {
+  if (!selected) {
+    return (
+      <div className="empty inspector-empty">
+        <Crosshair size={24} />
+        <p>Select a symbol in the source or outline.</p>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="alias-heading">
+        <h3>Type members</h3>
+        {targetClass && <span>{targetClass.name}</span>}
+      </div>
+      <p className="alias-note">
+        {targetClass
+          ? `Members of ${targetClass.name}, resolved through inheritance.`
+          : "Select a symbol whose type is a class to list its members."}
+      </p>
+
+      {selected.closures?.length > 0 && (
+        <div className="detail-section">
+          <div className="section-label">CLOSURES</div>
+          <div className="closure-list">
+            {selected.closures.map((c, i) => (
+              <span className="closure" key={i}>
+                {c.name}: {c.type}
+                {c.mutable ? " (mut)" : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {typeMembers.length ? (
+        <div className="member-list">
+          {typeMembers.map((m, i) => (
+            <button
+              className="member-row"
+              key={i}
+              onClick={() =>
+                m.symbolId
+                  ? navigate(
+                      symbols.find((s) => s.id === m.symbolId) || {
+                        path: m.path,
+                        line: m.line,
+                      },
+                    )
+                  : navigate({ path: m.path, line: m.line })
+              }
+            >
+              <span
+                className={`member-icon kind-${
+                  m.kind === "method" ? "function" : "variable"
+                }`}
+              >
+                <Icon
+                  kind={m.kind === "method" ? "function" : "variable"}
+                  size={12}
+                />
+              </span>
+              <span className="member-name">{m.name}</span>
+              {m.relationship && (
+                <span className={`member-rel rel-${m.relationship}`}>
+                  {m.relationship}
+                </span>
+              )}
+              {m.mutable && <span className="badge badge-mut">mut</span>}
+              {m.effect && m.effect !== "unknown" && (
+                <span className="badge badge-effect">{m.effect}</span>
+              )}
+              <code className="member-type">{m.type}</code>
+              <ArrowUpRight size={11} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="empty">
+          {targetClass ? "No members recorded for this class." : "No class type to inspect."}
+        </p>
+      )}
+    </>
+  );
+}
 
 export default Inspector;

@@ -435,6 +435,7 @@ class TypeChecker(ast.NodeVisitor):
         self.resolver = resolver  # callable(name) -> Type | None, cross-file/import
         self.members = members
         self.scopes: list[dict] = [{"kind": "module", "name": "<module>", "bindings": {}}]
+        self.class_id_stack: list = []
         self.errors: list[dict] = []
         self.facts: list[Fact] = []
         self.function_stack: list[dict] = []
@@ -567,6 +568,15 @@ class TypeChecker(ast.NodeVisitor):
         return Unknown()
 
     def visit_Attribute(self, node):
+        if (
+            isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "super"
+            and not node.value.args
+        ):
+            parent = self.members.parent_of(self.class_id_stack[-1] if self.class_id_stack else None)
+            member = self.members.lookup_id(parent, node.attr) if parent else None
+            return member if member is not None else Unknown()
         receiver = self.visit(node.value)
         if isinstance(receiver, Record):
             for name, field_type in receiver.fields:
@@ -798,16 +808,17 @@ class TypeChecker(ast.NodeVisitor):
             if scope["kind"] == "class":
                 class_name = scope["name"]
                 break
+        class_id = self.class_id_stack[-1] if self.class_id_stack else None
         decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
         is_static = "staticmethod" in decorators
         receiver = None
         if class_name and not is_static and args and args[0].arg in ("self", "cls"):
-            receiver = (args[0].arg, Named(class_name))
+            receiver = (args[0].arg, Named(class_name, class_id))
 
         for index, arg in enumerate(args):
             ann = parse_type(ast.unparse(arg.annotation)) if arg.annotation else None
             if ann is None and class_name and not is_static and index == 0 and arg.arg in ("self", "cls"):
-                ann = Named(class_name)
+                ann = Named(class_name, class_id)
             param_annotations.append((arg.arg, ann if ann is not None else Unknown()))
         ret_annotation = parse_type(ast.unparse(node.returns)) if node.returns else None
 
@@ -889,8 +900,10 @@ class TypeChecker(ast.NodeVisitor):
 
     def visit_ClassDef(self, node):
         self.push("class", node.name)
+        self.class_id_stack.append(self.members.name_to_id.get(node.name))
         for statement in node.body:
             self.visit(statement)
+        self.class_id_stack.pop()
         self.pop()
         return Named(node.name)
 
@@ -1068,6 +1081,30 @@ class MemberTable:
         cid = named.symbol_id or self.name_to_id.get(named.name)
         return self._lookup_id(cid, attr, set())
 
+    def lookup_id(self, cid, attr: str):
+        return self._lookup_id(cid, attr, set())
+
+    def parent_of(self, cid):
+        bases = self.bases.get(cid) or []
+        return bases[0] if bases else None
+
+    def member_set(self, cid):
+        """All members (own + inherited) with the first definition winning."""
+        result = {}
+        seen = set()
+
+        def collect(current):
+            if current in seen:
+                return
+            seen.add(current)
+            for name, type_ in self.local.get(current, {}).items():
+                result.setdefault(name, type_)
+            for base in self.bases.get(current, []):
+                collect(base)
+
+        collect(cid)
+        return result
+
 
 def _resolver_for(file, files_by_path, exports):
     """Build a cross-file name resolver for a single file."""
@@ -1121,7 +1158,27 @@ def analyze_types(files, declarations_by_path):
         checker.visit(tree)
         errors.extend(checker.errors)
         _attach_facts(f, checker.facts)
+    _attach_member_types(files, members)
     return errors
+
+
+def _attach_member_types(files, members: MemberTable):
+    """Attach a resolved type to every class member in the member tracker."""
+    for file in files:
+        symbols_by_id = {s["id"]: s for s in file["symbols"]}
+        for cls in file.get("classes", []):
+            for member in cls.get("memberTracker", {}).get("members", []):
+                symbol = symbols_by_id.get(member.get("symbolId"))
+                if symbol and symbol.get("computedType"):
+                    member["type"] = symbol["computedType"]
+                    member["mutable"] = symbol.get("mutable")
+                    member["effect"] = symbol.get("effect")
+                    member["closures"] = symbol.get("closures")
+                else:
+                    resolved = members.lookup_id(member.get("ownerId"), member["name"])
+                    if resolved is not None:
+                        member["type"] = display(resolved)
+                        member["mutable"] = is_mutable_type(resolved)
 
 
 def _attach_facts(file, facts):

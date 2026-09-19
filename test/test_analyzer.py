@@ -397,5 +397,28 @@ class Service:
         symbols = self.symbols(repo, 'app.py')
         self.assertEqual(symbols['use']['computedType'], '(self: Service) -> Repo')
 
+    def test_super_resolves_to_mro_base(self):
+        repo = self.index({'app.py': '''class Base:
+    def label(self) -> str:
+        return "x"
+class Child(Base):
+    def label(self) -> str:
+        return super().label()
+'''})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['label']['computedType'], '(self: Child) -> str')
+
+    def test_member_tracker_members_get_types(self):
+        repo = self.index({'app.py': '''class Base:
+    category = "base"
+class Child(Base):
+    def __init__(self):
+        self.count = 3
+'''})
+        child = repo['files'][0]['classes'][1]
+        members = {m['name']: m for m in child['memberTracker']['members']}
+        self.assertEqual(members['category']['type'], 'str')
+        self.assertEqual(members['count']['type'], 'int')
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)

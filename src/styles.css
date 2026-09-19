@@ -1012,3 +1012,52 @@ i {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 3px;
+  text-align: left;
+}
+.member-icon {
+  flex: 0 0 auto;
+}
+.member-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #d5dbe4;
+}
+.member-rel {
+  font-size: 9px;
+  color: #8d9ba9;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #1a1f26;
+}
+.member-rel.rel-inherited {
+  color: #93a4b8;
+}
+.member-rel.rel-overridden {
+  color: #e2c08d;
+}
+.member-type {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #91bfbb;
+  overflow-wrap: anywhere;
+  max-width: 55%;
+  text-align: right;
+}
+.member-row > svg {
+  flex: 0 0 auto;
+  color: #646f7d;
+}
