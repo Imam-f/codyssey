@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { Search, ChevronDown, FolderOpen } from "lucide-react";
+import { Search, FolderOpen } from "lucide-react";
 import { Icon, basename } from "../util";
 import FileTree from "./FileTree";
 
@@ -34,7 +34,6 @@ const Sidebar = forwardRef(function Sidebar(
       </label>
       <div className="file-tree">
         <div className="tree-root">
-          <ChevronDown size={13} />
           <FolderOpen size={14} />
           <b>{repo?.name || "repository"}</b>
         </div>
