@@ -16,11 +16,14 @@ import {
   Minus,
   Plus,
   Maximize2,
+  Minimize2,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  GitBranch,
 } from "lucide-react";
 
-const MAX_PER_COLUMN = 8;
-const STAGGER = 20;
-const ARROW_LANE_GAP = 12;
+const NODES_PER_COLUMN = 6;
 
 export function CallRelations({ graph, focusId, onNavigate, onFocus }) {
   const node = graph?.nodes.find((n) => n.id === focusId);
@@ -102,10 +105,26 @@ export function CallRelations({ graph, focusId, onNavigate, onFocus }) {
 
 export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
   const [query, setQuery] = useState("");
+  const [connectionQuery, setConnectionQuery] = useState("");
   const [showUnresolved, setShowUnresolved] = useState(true);
   const [direction, setDirection] = useState("both");
+  const [expanded, setExpanded] = useState(false);
+  const [showFunctions, setShowFunctions] = useState(true);
+  const [activeEdge, setActiveEdge] = useState(null);
+  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [layout, setLayout] = useState({ width: 0, height: 0, rects: {} });
+  const canvasRef = useRef(null);
+  const flowRef = useRef(null);
+  const viewRef = useRef(view);
+  const drag = useRef(null);
+  viewRef.current = view;
+
   const byId = useMemo(
     () => new Map((graph?.nodes || []).map((n) => [n.id, n])),
+    [graph],
+  );
+  const siteMap = useMemo(
+    () => new Map((graph?.sites || []).map((s) => [s.id, s])),
     [graph],
   );
   const choices = (graph?.nodes || []).filter((n) => !n.external);
@@ -125,397 +144,485 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
   const recursion = graph?.edges.find(
     (e) => e.from === focus?.id && e.to === focus?.id,
   );
-  const siteMap = useMemo(
-    () => new Map((graph?.sites || []).map((s) => [s.id, s])),
-    [graph],
-  );
   const filtered = choices.filter((n) =>
     `${n.label} ${n.path}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const chunk = (arr, size) => {
-    const out = [];
-    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-    return out;
+  const matches = (id) => {
+    const node = byId.get(id);
+    return (
+      node &&
+      `${node.label} ${node.path || ""}`
+        .toLowerCase()
+        .includes(connectionQuery.toLowerCase())
+    );
   };
-  const callerColumns = chunk(incoming, MAX_PER_COLUMN);
-  const calleeColumns = chunk(outgoing, MAX_PER_COLUMN);
+  const callers = incoming.filter((e) => matches(e.from));
+  const callees = outgoing.filter((e) => matches(e.to));
+  const layoutKey = JSON.stringify([
+    focus?.id,
+    direction,
+    callers.map((e) => e.from),
+    callees.map((e) => e.to),
+  ]);
 
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
-  const [flowSize, setFlowSize] = useState({ width: 0, height: 0 });
-  const [nodeRects, setNodeRects] = useState({});
-  const canvasRef = useRef(null);
-  const flowRef = useRef(null);
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const drag = useRef(null);
+  useEffect(() => {
+    setActiveEdge(null);
+  }, [focus?.id, connectionQuery, showUnresolved]);
 
-  const clampZoom = (k) => Math.min(Math.max(k, 0.05), 2.5);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
+
+  const clampZoom = (k) => Math.min(Math.max(k, 0.02), 2);
+  function fit(size = layout, readable = false) {
+    const canvas = canvasRef.current;
+    if (
+      !canvas?.clientWidth ||
+      !canvas.clientHeight ||
+      !size.width ||
+      !size.height
+    )
+      return;
+    const k = Math.min(
+      1,
+      Math.max(readable ? 0.75 : 0.02, (canvas.clientWidth - 40) / size.width),
+      Math.max(
+        readable ? 0.75 : 0.02,
+        (canvas.clientHeight - 48) / size.height,
+      ),
+    );
+    const selected = readable && size.rects[`center:${focus?.id}`];
+    setView({
+      k,
+      x: selected
+        ? canvas.clientWidth / 2 - ((selected.left + selected.right) / 2) * k
+        : (canvas.clientWidth - size.width * k) / 2,
+      y: selected
+        ? canvas.clientHeight / 2 - selected.centerY * k
+        : (canvas.clientHeight - size.height * k) / 2,
+    });
+  }
 
   useLayoutEffect(() => {
     const flow = flowRef.current;
-    if (!flow) return;
+    const canvas = canvasRef.current;
+    if (!flow || !canvas) return;
     const measure = () => {
-      const k = viewRef.current.k || 1;
+      if (!canvas.clientWidth || !canvas.clientHeight) return;
       const fr = flow.getBoundingClientRect();
+      const k = viewRef.current.k;
       const rects = {};
-      let maxRight = 0;
-      let maxBottom = 0;
       flow.querySelectorAll(".call-node").forEach((el) => {
-        const id = el.dataset.nodeId;
-        const side = el.dataset.side;
-        if (!id || !side) return;
         const r = el.getBoundingClientRect();
-        const rect = {
+        rects[`${el.dataset.side}:${el.dataset.nodeId}`] = {
           left: (r.left - fr.left) / k,
-          top: (r.top - fr.top) / k,
           right: (r.right - fr.left) / k,
-          bottom: (r.bottom - fr.top) / k,
+          top: (r.top - fr.top) / k,
           centerY: (r.top - fr.top + r.height / 2) / k,
         };
-        rects[`${side}:${id}`] = rect;
-        if (rect.right > maxRight) maxRight = rect.right;
-        if (rect.bottom > maxBottom) maxBottom = rect.bottom;
       });
-      setNodeRects(rects);
-      const arrowCount = Math.max(incoming.length, outgoing.length);
-      const arrowSpace = arrowCount > MAX_PER_COLUMN
-        ? 16 + arrowCount * ARROW_LANE_GAP
-        : 0;
-      setFlowSize({
-        width: Math.max(flow.offsetWidth, maxRight + 18),
-        height: Math.max(flow.offsetHeight, maxBottom + 40, maxBottom + arrowSpace),
-      });
+      const next = {
+        width: flow.offsetWidth,
+        height: flow.offsetHeight,
+        rects,
+      };
+      setLayout(next);
+      // Keep large, continuous graphs readable; Fit explicitly shows everything.
+      fit(next, true);
     };
     measure();
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(measure);
-      ro.observe(flow);
-      return () => ro.disconnect();
-    }
-  }, [graph, focus?.id, direction, showUnresolved]);
+    const observer = new ResizeObserver(measure);
+    observer.observe(flow);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [graph, layoutKey]);
 
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
     const onWheel = (e) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
       const rect = el.getBoundingClientRect();
       setView((v) => {
-        const k = clampZoom(v.k * factor);
-        const ox = e.clientX - rect.left;
-        const oy = e.clientY - rect.top;
-        const wx = (ox - v.x) / v.k;
-        const wy = (oy - v.y) / v.k;
-        return { k, x: ox - wx * k, y: oy - wy * k };
+        const k = clampZoom(v.k * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+        const x = e.clientX - rect.left,
+          y = e.clientY - rect.top;
+        return {
+          k,
+          x: x - ((x - v.x) * k) / v.k,
+          y: y - ((y - v.y) * k) / v.k,
+        };
       });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [Boolean(focus)]);
 
   function setZoom(next) {
-    const k = clampZoom(next);
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const ox = rect ? rect.width / 2 : 0;
-    const oy = rect ? rect.height / 2 : 0;
-    setView((v) => {
-      const wx = (ox - v.x) / v.k;
-      const wy = (oy - v.y) / v.k;
-      return { k, x: ox - wx * k, y: oy - wy * k };
-    });
-  }
-
-  function fitView() {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !flowSize.width || !flowSize.height) return;
-    const pad = 24;
-    const k = clampZoom(
-      Math.min(
-        (rect.width - pad * 2) / flowSize.width,
-        (rect.height - pad * 2) / flowSize.height,
-      ),
-    );
-    setView({
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const k = clampZoom(next),
+      x = canvas.clientWidth / 2,
+      y = canvas.clientHeight / 2;
+    setView((v) => ({
       k,
-      x: (rect.width - flowSize.width * k) / 2,
-      y: (rect.height - flowSize.height * k) / 2,
-    });
+      x: x - ((x - v.x) * k) / v.k,
+      y: y - ((y - v.y) * k) / v.k,
+    }));
   }
-
   function onPointerDown(e) {
-    if (e.target.closest("button, a, input, label")) return;
+    if (e.button !== 0 && e.button !== 1) return;
+    if (e.button === 0 && e.target.closest("button, a, input, label")) return;
+    e.preventDefault();
     drag.current = {
       startX: e.clientX,
       startY: e.clientY,
-      x: view.x,
-      y: view.y,
+      ...view,
       id: e.pointerId,
     };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {}
+    e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e) {
     const d = drag.current;
-    if (!d || d.id !== e.pointerId) return;
+    if (d?.id !== e.pointerId) return;
     setView((v) => ({
       ...v,
-      x: d.x + (e.clientX - d.startX),
-      y: d.y + (e.clientY - d.startY),
+      x: d.x + e.clientX - d.startX,
+      y: d.y + e.clientY - d.startY,
     }));
   }
   function onPointerUp(e) {
     if (drag.current?.id !== e.pointerId) return;
     drag.current = null;
-    try {
-      e.currentTarget.releasePointerCapture?.(e.pointerId);
-    } catch {}
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
   }
-
-  function arrowPath(from, to, offset = 0, lane = 0) {
-    const hop = 12 + lane * 2;
-    const y = to.centerY + offset * 4;
-    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${y} H ${to.left}`;
-  }
-
-  function wrappedArrowPath(from, to, lane, offset = 0) {
-    const hop = 12 + (lane % MAX_PER_COLUMN) * 2;
-    const busY = Math.max(...Object.values(nodeRects).map((rect) => rect.bottom))
-      + 16
-      + lane * ARROW_LANE_GAP;
-    const targetY = to.centerY + offset * 4;
-    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${busY} H ${to.left - hop} V ${targetY} H ${to.left}`;
-  }
-
-  function stagger(index, count) {
-    return count > 1 ? index - (count - 1) / 2 : 0;
-  }
-
-  function columnOffset(index, total) {
-    const columnStart = Math.floor(index / MAX_PER_COLUMN) * MAX_PER_COLUMN;
-    const columnSize = Math.min(MAX_PER_COLUMN, total - columnStart);
-    return stagger(index - columnStart, columnSize);
-  }
-
-  const arrows = [];
-  if (focus) {
-    const center = nodeRects[`center:${focus.id}`];
-    if (center) {
-      if (direction !== "outgoing")
-        incoming.forEach((edge, i) => {
-          const from = nodeRects[`left:${edge.from}`];
-          if (from)
-            arrows.push({
-              d:
-                i >= MAX_PER_COLUMN
-                  ? wrappedArrowPath(
-                      from,
-                      center,
-                      i,
-                      columnOffset(i, incoming.length),
-                    )
-                  : arrowPath(
-                      from,
-                      center,
-                      columnOffset(i, incoming.length),
-                      i % MAX_PER_COLUMN,
-                    ),
-              key: `i:${edge.from}`,
-            });
-        });
-      if (direction !== "incoming")
-        outgoing.forEach((edge, i) => {
-          const to = nodeRects[`right:${edge.to}`];
-          if (to)
-            arrows.push({
-              d:
-                i >= MAX_PER_COLUMN
-                  ? wrappedArrowPath(
-                      center,
-                      to,
-                      i,
-                      columnOffset(i, outgoing.length),
-                    )
-                  : arrowPath(
-                      center,
-                      to,
-                      columnOffset(i, outgoing.length),
-                      i % MAX_PER_COLUMN,
-                    ),
-              key: `o:${edge.to}`,
-            });
-        });
+  function openSite(site) {
+    if (site) {
+      setExpanded(false);
+      onNavigate({ path: site.path, line: site.line, symbolId: site.callerId });
     }
   }
-
+  function openDefinition(node) {
+    setExpanded(false);
+    onNavigate(node);
+  }
   function nodeCard(node, edge, side) {
+    if (!node) return null;
+    const edgeKey = `${side}:${node.id}`;
     return (
       <div
-        className={`call-node ${node.external ? "external" : ""} ${side === "center" ? "focused" : ""}`}
+        className={`call-node ${node.external ? "external" : ""} ${side === "center" ? "focused" : ""} ${activeEdge === edgeKey ? "highlighted" : ""}`}
         key={node.id}
         data-node-id={node.id}
         data-side={side}
+        onMouseEnter={() => setActiveEdge(side === "center" ? null : edgeKey)}
+        onMouseLeave={() => setActiveEdge(null)}
+        onFocus={() => setActiveEdge(side === "center" ? null : edgeKey)}
+        onBlur={() => setActiveEdge(null)}
       >
+        <div className="call-node-kind">
+          <span className="call-kind-dot" />
+          {side === "center"
+            ? "FOCUS"
+            : node.external
+              ? "EXTERNAL / DYNAMIC"
+              : node.kind === "module"
+                ? "MODULE"
+                : "IN REPOSITORY"}
+          {edge && (
+            <span>
+              {edge.sites.length} {edge.sites.length === 1 ? "call" : "calls"}
+            </span>
+          )}
+        </div>
         <div className="call-node-header">
-          <Braces size={14} />
+          <Braces size={16} />
           <button
             title={node.label}
             disabled={node.external}
             onClick={() => onFocus(node.id)}
           >
-            {node.label}
+            {node.label.split(".").map((part, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && (
+                  <>
+                    .<wbr />
+                  </>
+                )}
+                {part}
+              </React.Fragment>
+            ))}
           </button>
           {!node.external && (
             <button
               title={`Open definition of ${node.label}`}
-              onClick={() => onNavigate(node)}
+              onClick={() => openDefinition(node)}
             >
-              <ArrowUpRight size={13} />
+              <ArrowUpRight size={15} />
             </button>
           )}
         </div>
-        <div className="call-node-location">
+        <div
+          className="call-node-location"
+          title={
+            node.external
+              ? "No indexed definition for this target"
+              : `${node.path}:${node.line}`
+          }
+        >
           {node.external
-            ? "external / dynamic · unresolved"
+            ? "No indexed definition"
             : `${node.path}:${node.line}`}
         </div>
         {edge && (
           <div className="call-node-sites">
-            {edge.sites.map((id) => {
-              const site = siteMap.get(id);
-              return (
-                <button
-                  key={id}
-                  title={`Open call site ${site.path}:${site.line}`}
-                  onClick={() =>
-                    onNavigate({
-                      path: site.path,
-                      line: site.line,
-                      symbolId: site.callerId,
-                    })
-                  }
-                >
-                  L{site.line}
-                  <ArrowUpRight size={10} />
-                </button>
-              );
-            })}
-            <span>
-              {edge.sites.length}{" "}
-              {edge.sites.length === 1 ? "call site" : "call sites"}
-            </span>
+            <span>Call sites</span>
+            <div className="call-site-buttons">
+              {edge.sites.map((id) => {
+                const site = siteMap.get(id);
+                return (
+                  site && (
+                    <button
+                      key={id}
+                      title={`Open call site ${site.path}:${site.line}`}
+                      onClick={() => openSite(site)}
+                    >
+                      L{site.line}
+                      <ArrowUpRight size={10} />
+                    </button>
+                  )
+                );
+              })}
+            </div>
           </div>
         )}
         {side === "center" && (
-          <div className="call-node-sites">
+          <div className="call-focus-stats">
             <span>
-              {incoming.length} callers · {outgoing.length} targets
+              <b>{incoming.length}</b> callers
             </span>
-            {recursion && (
-              <button
-                title="Open recursive call"
-                onClick={() => {
-                  const site = siteMap.get(recursion.sites[0]);
-                  onNavigate({
-                    path: site.path,
-                    line: site.line,
-                    symbolId: site.callerId,
-                  });
-                }}
-              >
-                <RotateCcw size={11} />
-                Recursive · {recursion.sites.length}
-              </button>
-            )}
+            <ArrowRight size={14} />
+            <span>
+              <b>{outgoing.length}</b> targets
+            </span>
           </div>
         )}
       </div>
     );
   }
+  function relationColumn(side, edges, total) {
+    const isLeft = side === "left";
+    const columns = [];
+    for (let i = 0; i < edges.length; i += NODES_PER_COLUMN) {
+      columns.push(edges.slice(i, i + NODES_PER_COLUMN));
+    }
+    return (
+      <section className={`call-side ${isLeft ? "callers" : "callees"}`}>
+        <h3>
+          {isLeft ? "Called by" : "Calls"}
+          <span className="count">{total}</span>
+        </h3>
+        <div className="call-columns">
+          {columns.map((column, i) => (
+            <div className="call-column" key={i}>
+              {column.map((edge) =>
+                nodeCard(byId.get(isLeft ? edge.from : edge.to), edge, side),
+              )}
+            </div>
+          ))}
+        </div>
+        {!edges.length && (
+          <div className="call-empty-state">
+            <GitBranch size={22} />
+            <p>
+              {connectionQuery
+                ? "No matching connections"
+                : isLeft
+                  ? "No indexed callers"
+                  : "No outgoing calls"}
+            </p>
+            <small>
+              {connectionQuery
+                ? "Try another name or file."
+                : isLeft
+                  ? "This is an entry point, or its callers are outside the index."
+                  : "Try showing unresolved targets."}
+            </small>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  const arrows = [];
+  const center = layout.rects[`center:${focus?.id}`];
+  if (center) {
+    // Distant columns connect through the space above the cards. Their vertical
+    // branches stay in column gutters rather than crossing intervening nodes.
+    const railY =
+      Math.min(...Object.values(layout.rects).map((r) => r.top)) - 48;
+    const addArrow = (edge, side) => {
+      const id = side === "left" ? edge.from : edge.to;
+      const other = layout.rects[`${side}:${id}`];
+      if (!other) return;
+      const from = side === "left" ? other : center,
+        to = side === "left" ? center : other;
+      const mid = (from.right + to.left) / 2;
+      const spansColumns = to.left - from.right > 100;
+      arrows.push({
+        key: `${side}:${id}`,
+        external: !edge.resolved,
+        d: spansColumns
+          ? `M ${from.right} ${from.centerY} H ${from.right + 20} V ${railY} H ${to.left - 20} V ${to.centerY} H ${to.left}`
+          : `M ${from.right} ${from.centerY} C ${mid} ${from.centerY}, ${mid} ${to.centerY}, ${to.left} ${to.centerY}`,
+      });
+    };
+    if (direction !== "outgoing") callers.forEach((e) => addArrow(e, "left"));
+    if (direction !== "incoming") callees.forEach((e) => addArrow(e, "right"));
+  }
 
   return (
-    <div className="call-graph-view">
+    <div className={`call-graph-view ${expanded ? "is-expanded" : ""}`}>
       <div className="graph-toolbar">
-        <div>
-          <h2>Function call graph</h2>
-          <span>
-            {choices.filter((n) => n.kind === "function").length} functions ·{" "}
-            {graph?.sites.length || 0} call sites ·{" "}
-            {graph?.sites.filter((s) => !s.resolved).length || 0} unresolved
-          </span>
+        <div className="call-graph-heading">
+          <div className="call-graph-icon">
+            <GitBranch size={21} />
+          </div>
+          <div>
+            <h2>Function call graph</h2>
+            <span>
+              {choices.filter((n) => n.kind === "function").length} functions ·{" "}
+              {graph?.sites.length || 0} call sites
+            </span>
+          </div>
         </div>
-        <label className="scope-toggle">
-          <input
-            type="checkbox"
-            checked={showUnresolved}
-            onChange={(e) => setShowUnresolved(e.target.checked)}
-          />
-          Show unresolved
-        </label>
+        <div className="call-toolbar-actions">
+          <label className="scope-toggle">
+            <input
+              type="checkbox"
+              checked={showUnresolved}
+              onChange={(e) => setShowUnresolved(e.target.checked)}
+            />
+            Show unresolved
+          </label>
+          <button
+            title={expanded ? "Exit fullscreen" : "Expand graph"}
+            aria-pressed={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+        </div>
       </div>
       <div className="call-workspace">
-        <aside className="call-function-list">
-          <label className="filter">
-            <Search size={13} />
-            <input
-              aria-label="Find function"
-              placeholder="Find function…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          <div className="call-function-results">
-            {filtered.map((node) => (
-              <button
-                className={focus?.id === node.id ? "active" : ""}
-                key={node.id}
-                title={`${node.label} · ${node.path}:${node.line}`}
-                onClick={() => onFocus(node.id)}
-              >
-                <Braces size={12} />
-                <span>
-                  {node.label}
-                  <small>
-                    {node.path}:{node.line}
-                  </small>
-                </span>
-              </button>
-            ))}
-            {!filtered.length && (
-              <p className="empty">No matching functions.</p>
-            )}
-          </div>
-        </aside>
+        {showFunctions && (
+          <aside className="call-function-list">
+            <div className="call-list-label">
+              FUNCTIONS <span>{choices.length}</span>
+            </div>
+            <label className="filter">
+              <Search size={14} />
+              <input
+                aria-label="Find function"
+                placeholder="Find a function…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            <div className="call-function-results">
+              {filtered.map((node) => (
+                <button
+                  className={focus?.id === node.id ? "active" : ""}
+                  key={node.id}
+                  title={`${node.label} · ${node.path}:${node.line}`}
+                  onClick={() => onFocus(node.id)}
+                >
+                  <Braces size={13} />
+                  <span>
+                    {node.label}
+                    <small>
+                      {node.path}:{node.line}
+                    </small>
+                  </span>
+                  {focus?.id === node.id && <ChevronRight size={12} />}
+                </button>
+              ))}
+              {!filtered.length && (
+                <p className="empty">No matching functions.</p>
+              )}
+            </div>
+            <div className="call-list-footer">
+              Select a function to explore its neighborhood.
+            </div>
+          </aside>
+        )}
         <div className="call-graph-detail">
-          <div
-            className="call-direction"
-            role="group"
-            aria-label="Call graph direction"
-          >
-            {[
-              ["both", "Both directions"],
-              ["incoming", "Called by"],
-              ["outgoing", "Calls"],
-            ].map(([value, label]) => (
-              <button
-                className={direction === value ? "active" : ""}
-                key={value}
-                onClick={() => setDirection(value)}
-              >
-                {label}
-              </button>
-            ))}
-            <span>Click a node to follow its calls</span>
+          <div className="call-controls">
+            <button
+              title={
+                showFunctions ? "Hide function list" : "Show function list"
+              }
+              onClick={() => setShowFunctions((v) => !v)}
+            >
+              {showFunctions ? (
+                <PanelLeftClose size={16} />
+              ) : (
+                <PanelLeftOpen size={16} />
+              )}
+            </button>
+            <div
+              className="call-direction"
+              role="group"
+              aria-label="Call graph direction"
+            >
+              {[
+                ["both", "Both directions"],
+                ["incoming", "Called by"],
+                ["outgoing", "Calls"],
+              ].map(([value, label]) => (
+                <button
+                  className={direction === value ? "active" : ""}
+                  aria-pressed={direction === value}
+                  key={value}
+                  onClick={() => setDirection(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="call-connection-filter">
+              <Search size={13} />
+              <input
+                aria-label="Filter connections"
+                placeholder="Filter connections…"
+                value={connectionQuery}
+                onChange={(e) => setConnectionQuery(e.target.value)}
+              />
+            </label>
           </div>
           {focus ? (
             <div
               className="call-canvas"
               ref={canvasRef}
-              onPointerDown={onPointerDown}
+              onPointerDownCapture={onPointerDown}
+              onMouseDownCapture={(e) => {
+                if (e.button === 1) e.preventDefault();
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1) e.preventDefault();
+              }}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp}
+              onLostPointerCapture={() => {
+                drag.current = null;
+              }}
             >
               <div
                 className={`call-flow ${direction}`}
@@ -526,118 +633,106 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
               >
                 <svg
                   className="call-arrows"
-                  width={flowSize.width}
-                  height={flowSize.height}
+                  width={layout.width}
+                  height={layout.height}
+                  aria-hidden="true"
                 >
                   <defs>
                     <marker
                       id="call-arrow"
                       viewBox="0 0 10 10"
-                      refX="10"
+                      refX="9"
                       refY="5"
-                      markerWidth="10"
-                      markerHeight="10"
-                      markerUnits="userSpaceOnUse"
-                      orient="auto"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
                     >
-                      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#778f81" />
+                      <path
+                        d="M 1 1 L 9 5 L 1 9"
+                        fill="none"
+                        stroke="context-stroke"
+                        strokeWidth="1.5"
+                      />
                     </marker>
                   </defs>
                   {arrows.map((a) => (
                     <path
                       key={a.key}
+                      className={`call-edge ${a.external ? "external" : ""} ${activeEdge === a.key ? "active" : activeEdge ? "muted" : ""}`}
                       d={a.d}
-                      fill="none"
-                      stroke="#778f81"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
                       markerEnd="url(#call-arrow)"
                     />
                   ))}
                 </svg>
-                {direction !== "outgoing" && (
-                  <div className="call-side callers">
-                    <h3>
-                      CALLED BY <span className="count">{incoming.length}</span>
-                    </h3>
-                    <div className="call-side-columns">
-                      {callerColumns.map((edges, i) => (
-                        <div
-                          className="call-column"
-                          key={`callers-${i}`}
-                          style={{ marginTop: i * STAGGER }}
-                        >
-                          {edges.map((edge) =>
-                            nodeCard(byId.get(edge.from), edge, "left"),
-                          )}
-                        </div>
-                      ))}
-                      {!incoming.length && (
-                        <p className="call-empty">No indexed callers</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {direction !== "outgoing" &&
+                  relationColumn("left", callers, incoming.length)}
                 <section className="call-column selected-function">
-                  <h3>SELECTED FUNCTION</h3>
+                  <h3>
+                    <Crosshair size={13} />
+                    Selected function
+                  </h3>
                   {nodeCard(focus, null, "center")}
                   {recursion && (
-                    <div className="recursion-link">
+                    <button
+                      className="recursion-link"
+                      title="Open recursive call"
+                      onClick={() => openSite(siteMap.get(recursion.sites[0]))}
+                    >
                       <RotateCcw size={13} />
-                      Calls itself
-                    </div>
+                      <span>Calls itself</span>
+                      <span className="count">{recursion.sites.length}</span>
+                    </button>
                   )}
+                  <p className="call-focus-hint">
+                    Follow a function to explore.
+                    <br />
+                    Open <ArrowUpRight size={11} /> to jump to source.
+                  </p>
                 </section>
-                {direction !== "incoming" && (
-                  <div className="call-side callees">
-                    <h3>
-                      CALLS <span className="count">{outgoing.length}</span>
-                    </h3>
-                    <div className="call-side-columns">
-                      {calleeColumns.map((edges, i) => (
-                        <div
-                          className="call-column"
-                          key={`callees-${i}`}
-                          style={{ marginTop: i * STAGGER }}
-                        >
-                          {edges.map((edge) =>
-                            nodeCard(byId.get(edge.to), edge, "right"),
-                          )}
-                        </div>
-                      ))}
-                      {!outgoing.length && (
-                        <p className="call-empty">
-                          No {showUnresolved ? "" : "resolved "}outgoing calls
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {direction !== "incoming" &&
+                  relationColumn("right", callees, outgoing.length)}
+              </div>
+              <div className="call-canvas-hint">
+                Left or middle drag to pan <span>·</span> Scroll to zoom
               </div>
             </div>
           ) : (
-            <p className="empty">
-              No functions or call sites found in this repository.
-            </p>
+            <div className="call-no-graph">
+              <GitBranch size={32} />
+              <h3>No functions found</h3>
+              <p>Open a repository with functions to explore their calls.</p>
+            </div>
           )}
-        </div>
-      </div>
-      <div className="graph-bottom">
-        <span>
-          Caller <ArrowRight size={12} /> callee · Direct calls only
-        </span>
-        <div>
-          <button title="Zoom out" onClick={() => setZoom(view.k / 1.12)}>
-            <Minus size={14} />
-          </button>
-          <span>{Math.round(view.k * 100)}%</span>
-          <button title="Zoom in" onClick={() => setZoom(view.k * 1.12)}>
-            <Plus size={14} />
-          </button>
-          <button title="Fit in view" onClick={fitView}>
-            <Maximize2 size={14} />
-          </button>
+          <div className="graph-bottom">
+            <div className="call-legend">
+              <span className="call-legend-line" />
+              Resolved
+              <span className="call-legend-line unresolved" />
+              Unresolved
+            </div>
+            <div className="call-zoom">
+              <button title="Zoom out" onClick={() => setZoom(view.k / 1.15)}>
+                <Minus size={14} />
+              </button>
+              <button title="Reset zoom to 100%" onClick={() => setZoom(1)}>
+                {Math.round(view.k * 100)}%
+              </button>
+              <button title="Zoom in" onClick={() => setZoom(view.k * 1.15)}>
+                <Plus size={14} />
+              </button>
+              <span className="call-control-divider" />
+              <button
+                title="Center on selected function"
+                onClick={() => fit(layout, true)}
+              >
+                <Crosshair size={14} />
+              </button>
+              <button title="Fit in view" onClick={() => fit()}>
+                <Maximize2 size={14} />
+                <span>Fit</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

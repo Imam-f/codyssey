@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   FileCode2,
   X,
@@ -12,7 +13,7 @@ import {
   Check,
   ArrowUpRight,
 } from "lucide-react";
-import { Icon, basename, clamp } from "../util";
+import { Icon, basename } from "../util";
 import Resizer from "./Resizer";
 
 export default function SourceView({
@@ -54,6 +55,7 @@ export default function SourceView({
   onScroll,
   clearTabState,
 }) {
+  const bottomRef = useRef(null);
   const closeTab = (tab) => {
     clearTabState(tab);
     const next = tabs.filter((t) => t !== tab);
@@ -219,13 +221,14 @@ export default function SourceView({
       <Resizer
         orientation="horizontal"
         label="Resize panel"
-        onResize={(d) =>
-          setBottomHeight((h) =>
-            clamp(h - d, 120, Math.max(200, window.innerHeight - 220)),
-          )
-        }
+        targetRef={bottomRef}
+        size={bottomHeight}
+        min={120}
+        max={Math.max(200, window.innerHeight - 220)}
+        sign={-1}
+        onResize={setBottomHeight}
       />
-      <section className="bottom-panel" style={{ height: bottomHeight }}>
+      <section className="bottom-panel" ref={bottomRef} style={{ height: bottomHeight }}>
         <div className="bottom-tabs">
           <button
             className={bottom === "references" ? "active" : ""}

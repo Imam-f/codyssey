@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { initHighlighter } from "./highlight";
 import CallGraph from "./CallGraph";
-import { api, clamp } from "./util";
+import { api } from "./util";
 import Resizer from "./components/Resizer";
 import InheritanceGraph from "./components/InheritanceGraph";
 import ClassTracker from "./components/ClassTracker";
@@ -57,7 +57,9 @@ function App() {
   const codeRef = useRef(null),
     findRef = useRef(null),
     tabStateRef = useRef({}),
-    pendingScrollRef = useRef(null);
+    pendingScrollRef = useRef(null),
+    sidebarRef = useRef(null),
+    inspectorRef = useRef(null);
   const file = repo?.files.find((f) => f.path === path);
   const referencesByLine = useMemo(() => {
     const map = new Map();
@@ -397,6 +399,7 @@ function App() {
       <div className="workspace">
         {sidebar && (
           <Sidebar
+            ref={sidebarRef}
             sidebarWidth={sidebarWidth}
             repo={repo}
             fileQuery={fileQuery}
@@ -411,7 +414,11 @@ function App() {
           <Resizer
             orientation="vertical"
             label="Resize explorer"
-            onResize={(d) => setSidebarWidth((w) => clamp(w + d, 160, 520))}
+            targetRef={sidebarRef}
+            size={sidebarWidth}
+            min={160}
+            max={520}
+            onResize={setSidebarWidth}
           />
         )}
         <main className="main">
@@ -542,28 +549,38 @@ function App() {
             <InheritanceGraph classes={classes} onNavigate={navigate} />
           </div>
         </main>
-        <Resizer
-          orientation="vertical"
-          label="Resize inspector"
-          onResize={(d) => setInspectorWidth((w) => clamp(w - d, 200, 560))}
-        />
-        <Inspector
-          inspector={inspector}
-          setInspector={setInspector}
-          inspectorWidth={inspectorWidth}
-          selected={selected}
-          definition={definition}
-          aliases={aliases}
-          symbols={symbols}
-          navigate={navigate}
-          goToDefinition={goToDefinition}
-          repo={repo}
-          refs={refs}
-          callContext={callContext}
-          callGraph={repo?.callGraph}
-          focusCall={focusCall}
-          path={path}
-        />
+        {view !== "calls" && (
+          <>
+            <Resizer
+              orientation="vertical"
+              label="Resize inspector"
+              targetRef={inspectorRef}
+              size={inspectorWidth}
+              min={200}
+              max={560}
+              sign={-1}
+              onResize={setInspectorWidth}
+            />
+            <Inspector
+              ref={inspectorRef}
+              inspector={inspector}
+              setInspector={setInspector}
+              inspectorWidth={inspectorWidth}
+              selected={selected}
+              definition={definition}
+              aliases={aliases}
+              symbols={symbols}
+              navigate={navigate}
+              goToDefinition={goToDefinition}
+              repo={repo}
+              refs={refs}
+              callContext={callContext}
+              callGraph={repo?.callGraph}
+              focusCall={focusCall}
+              path={path}
+            />
+          </>
+        )}
       </div>
       )}
       <StatusBar

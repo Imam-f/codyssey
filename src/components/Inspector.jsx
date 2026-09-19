@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, forwardRef } from "react";
 import {
   Box,
   ArrowUpRight,
@@ -12,25 +12,28 @@ import {
 import { Icon, basename } from "../util";
 import { CallRelations } from "../CallGraph";
 
-export default function Inspector({
-  inspector,
-  setInspector,
-  inspectorWidth,
-  selected,
-  definition,
-  aliases,
-  symbols,
-  navigate,
-  goToDefinition,
-  repo,
-  refs,
-  callContext,
-  callGraph,
-  focusCall,
-  path,
-}) {
+const Inspector = forwardRef(function Inspector(
+  {
+    inspector,
+    setInspector,
+    inspectorWidth,
+    selected,
+    definition,
+    aliases,
+    symbols,
+    navigate,
+    goToDefinition,
+    repo,
+    refs,
+    callContext,
+    callGraph,
+    focusCall,
+    path,
+  },
+  ref,
+) {
   return (
-    <aside className="inspector" style={{ width: inspectorWidth }}>
+    <aside className="inspector" ref={ref} style={{ width: inspectorWidth }}>
       <div className="inspector-tabs">
         <button
           className={inspector === "symbol" ? "active" : ""}
@@ -269,4 +272,6 @@ export default function Inspector({
       )}
     </aside>
   );
-}
+});
+
+export default Inspector;

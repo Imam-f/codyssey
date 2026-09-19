@@ -708,6 +708,10 @@ i {
   font-family: var(--mono);
   width: 106px;
   flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 72%, transparent);
+  mask-image: linear-gradient(to right, #000 72%, transparent);
 }
 .reference-row code {
   font-family: var(--mono);

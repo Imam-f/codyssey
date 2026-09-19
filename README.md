@@ -1,6 +1,6 @@
 # Codyssey
 
-**v0.2.0** · [MIT License](LICENSE)
+**v0.3.0** · [MIT License](LICENSE)
 
 > A developer tool where you anger the gods and commit atrocities against humanity
 
@@ -8,7 +8,7 @@ A compact Electron desktop app for inspecting Python repositories. The interface
 
 ## Download
 
-[Download Codyssey v0.2.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.2.0/Codyssey-0.2.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.2.0)
+[Download Codyssey v0.3.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.3.0/Codyssey-0.3.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.3.0)
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure it is on PATH, then launch the portable `.exe`. No app installation or Node.js setup is needed; `uv` selects or installs Python 3.12+ for analysis.
 
@@ -81,7 +81,7 @@ The packaged application also requires `uv` on PATH. All highlighting assets are
 - **Aliases** shows import aliases and assignment chains, their scopes, source lines, and reassignment boundaries. Target links navigate to indexed symbols.
 - **Inheritance** shows repository classes, multiple inheritance, and unresolved external bases. Search narrows to a class and its ancestors/descendants. Click a class to open its declaration, or use its crosshair to focus the hierarchy. Zoom and scroll to explore large graphs.
 - **Class tracker** lists every repository class and, for the selected class, its bases and metrics, with methods and properties grouped by whether they are added, overridden, inherited, or dynamically assigned. Instance properties first assigned by methods other than `__init__` are flagged as dynamic. Search by class or member name; each member links to its declaration.
-- **Call graph** shows the selected function between its direct **Called by** and **Calls** neighbors. Search functions, follow a node to refocus, filter either direction, or hide unresolved targets. Definition buttons open source; line-number buttons open the exact call site. Repeated calls share an edge with separate call-site links, and recursion is marked explicitly. The inspector also lists calls and callers for the selected function or the function containing the selected variable.
+- **Call graph** shows the selected function between its direct **Called by** and **Calls** neighbors. Search functions, follow a node to refocus, filter either direction, hide unresolved targets, or filter connections by name. Definition buttons open source; line-number buttons open the exact call site. Repeated calls share an edge with separate call-site links, and recursion is marked explicitly. Expand the graph to fullscreen, hide the function list for a wider canvas, and hover a node or edge to highlight its connections. The inspector also lists calls and callers for the selected function or the function containing the selected variable.
 - **Ctrl+P** searches files, classes, functions, and type aliases. **Ctrl+F** filters the variable/symbol table by name or type.
 - **F5** reindexes the current repository after external changes. Back/forward buttons navigate source history. The download button exports the complete index, including source code, as JSON.
 

@@ -1,19 +1,23 @@
+import { forwardRef } from "react";
 import { Search, ChevronDown, FolderOpen } from "lucide-react";
 import { Icon, basename } from "../util";
 import FileTree from "./FileTree";
 
-export default function Sidebar({
-  sidebarWidth,
-  repo,
-  fileQuery,
-  setFileQuery,
-  path,
-  selectedId,
-  navigate,
-  file,
-}) {
+const Sidebar = forwardRef(function Sidebar(
+  {
+    sidebarWidth,
+    repo,
+    fileQuery,
+    setFileQuery,
+    path,
+    selectedId,
+    navigate,
+    file,
+  },
+  ref,
+) {
   return (
-    <aside className="sidebar" style={{ width: sidebarWidth }}>
+    <aside className="sidebar" ref={ref} style={{ width: sidebarWidth }}>
       <div className="panel-heading">
         <span>EXPLORER</span>
         <span className="muted">{repo?.stats.files ?? 0} files</span>
@@ -82,4 +86,6 @@ export default function Sidebar({
       </div>
     </aside>
   );
-}
+});
+
+export default Sidebar;
