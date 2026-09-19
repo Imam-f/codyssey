@@ -31,6 +31,17 @@ try {
   );
   assert.equal(await page.locator(".symbol-title h2").textContent(), "user");
   assert.equal(await page.locator(".reference-row").count(), 5);
+  const minimap = page.getByRole("scrollbar", { name: "Code minimap" });
+  assert.equal(await minimap.getAttribute("aria-valuenow"), "24");
+  const lastLine = await minimap.getAttribute("aria-valuemax");
+  await minimap.focus();
+  await page.keyboard.press("End");
+  assert.equal(await minimap.getAttribute("aria-valuenow"), lastLine);
+  assert.equal(
+    await page.locator(".current-line").getAttribute("data-line"),
+    lastLine,
+  );
+  await page.locator('.code-line[data-line="24"] .line-number').click();
   await page
     .locator(".view-tabs")
     .getByRole("button", { name: /Overview/ })

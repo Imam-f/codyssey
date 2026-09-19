@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FileCode2,
   X,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Icon, basename } from "../util";
 import Resizer from "./Resizer";
+import SourceMinimap from "./SourceMinimap";
 
 export default function SourceView({
   file,
@@ -56,6 +57,30 @@ export default function SourceView({
   clearTabState,
 }) {
   const bottomRef = useRef(null);
+  const [viewport, setViewport] = useState({
+    scrollTop: 0,
+    scrollHeight: 1,
+    clientHeight: 1,
+  });
+
+  function syncViewport(element) {
+    if (!element) return;
+    setViewport({
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    });
+  }
+
+  useEffect(() => {
+    const element = codeRef.current;
+    if (!element) return;
+    syncViewport(element);
+    const observer = new ResizeObserver(() => syncViewport(element));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [codeRef, file, tokens]);
+
   const closeTab = (tab) => {
     clearTabState(tab);
     const next = tabs.filter((t) => t !== tab);
@@ -121,26 +146,34 @@ export default function SourceView({
         )}
         <span className="breadcrumb-end">{file?.lines || 0} lines</span>
       </div>
-      <div className="source-area" ref={codeRef} onScroll={onScroll}>
-        {!file ? (
-          <div className="welcome">
-            <Code2 size={30} />
-            <h2>Open a Python repository</h2>
-            <p>Inspect symbols, follow aliases, explore inheritance.</p>
-            <button
-              className="primary"
-              onClick={() => load("open")}
-              disabled={busy}
-            >
-              <FolderOpen size={14} />
-              Open folder<kbd>Ctrl O</kbd>
-            </button>
-            <button onClick={() => load("sample")} disabled={busy}>
-              Load example repository
-            </button>
-          </div>
-        ) : (
-          <div className="code" role="region" aria-label="Python source">
+      <div className="source-shell">
+        <div
+          className="source-area"
+          ref={codeRef}
+          onScroll={(event) => {
+            onScroll(event);
+            syncViewport(event.currentTarget);
+          }}
+        >
+          {!file ? (
+            <div className="welcome">
+              <Code2 size={30} />
+              <h2>Open a Python repository</h2>
+              <p>Inspect symbols, follow aliases, explore inheritance.</p>
+              <button
+                className="primary"
+                onClick={() => load("open")}
+                disabled={busy}
+              >
+                <FolderOpen size={14} />
+                Open folder<kbd>Ctrl O</kbd>
+              </button>
+              <button onClick={() => load("sample")} disabled={busy}>
+                Load example repository
+              </button>
+            </div>
+          ) : (
+            <div className="code" role="region" aria-label="Python source">
             {file.source.split("\n").map((text, row) => {
               const rowRefs = referencesByLine.get(row + 1) || [];
               const lineRefs = rowRefs.filter(
@@ -215,7 +248,27 @@ export default function SourceView({
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
+        </div>
+        {file && (
+          <SourceMinimap
+            file={file}
+            path={path}
+            tokens={tokens}
+            sourceRef={codeRef}
+            viewport={viewport}
+            line={line}
+            setLine={(nextLine) => {
+              setLine(nextLine);
+              setActiveReference(null);
+            }}
+            selected={selected}
+            selectedId={selectedId}
+            referencesByLine={referencesByLine}
+            activeScope={activeScope}
+            diagnostics={diagnostics}
+          />
         )}
       </div>
       <Resizer

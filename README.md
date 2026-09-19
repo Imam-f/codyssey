@@ -4,7 +4,7 @@
 
 > A developer tool where you anger the gods and commit atrocities against humanity
 
-A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph.
+A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer with a code minimap, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph. Reopening a repository reuses a fingerprint-validated analysis cache for near-instant startup.
 
 ## Download
 
@@ -28,7 +28,7 @@ See lines of code and top-level symbol counts per file, with sortable columns an
 
 ### Source explorer
 
-Browse highlighted Python source alongside symbol details, types, and references.
+Browse highlighted Python source alongside symbol details, types, and references. A code minimap beside the editor overviews the whole file and jumps to any line.
 
 ![Codyssey source explorer showing the sample repository, a selected symbol, and its references](docs/screenshots/source.png)
 
@@ -82,6 +82,7 @@ The packaged application also requires `uv` on PATH. All highlighting assets are
 - **Inheritance** shows repository classes, multiple inheritance, and unresolved external bases. Search narrows to a class and its ancestors/descendants. Click a class to open its declaration, or use its crosshair to focus the hierarchy. Zoom and scroll to explore large graphs.
 - **Class tracker** lists every repository class and, for the selected class, its bases and metrics, with methods and properties grouped by whether they are added, overridden, inherited, or dynamically assigned. Instance properties first assigned by methods other than `__init__` are flagged as dynamic. Search by class or member name; each member links to its declaration.
 - **Call graph** shows the selected function between its direct **Called by** and **Calls** neighbors. Search functions, follow a node to refocus, filter either direction, hide unresolved targets, or filter connections by name. Definition buttons open source; line-number buttons open the exact call site. Repeated calls share an edge with separate call-site links, and recursion is marked explicitly. Expand the graph to fullscreen, hide the function list for a wider canvas, and hover a node or edge to highlight its connections. The inspector also lists calls and callers for the selected function or the function containing the selected variable.
+- The **code minimap** beside the source shows a syntax-colored overview of the whole file: highlights the current line, the visible viewport, the selected symbol's lines, and diagnostics. Click or drag to jump to a line; the minimap also supports keyboard navigation (arrow keys, Page Up/Down, Home/End).
 - **Ctrl+P** searches files, classes, functions, and type aliases. **Ctrl+F** filters the variable/symbol table by name or type.
 - **F5** reindexes the current repository after external changes. Back/forward buttons navigate source history. The download button exports the complete index, including source code, as JSON.
 
@@ -206,6 +207,7 @@ Resolution is conservative and not path-sensitive or interprocedural: callbacks,
 - Common environment, dependency, cache, and build directories are excluded (`.git`, `.venv`, `venv`, `env`, `__pycache__`, `node_modules`, `dist`, `build`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `site-packages`).
 - Python source encodings are respected via `tokenize.open`.
 - Reindexing is manual (`F5`); repositories are not watched automatically.
+- Analysis results are cached per repository under the user-data directory. Reopening a repository skips analysis when its file fingerprint (paths, sizes, and modification times of indexed Python files) is unchanged; `F5` always reanalyzes. The cache is versioned against the app version and invalidated automatically on mismatch.
 
 ### What it does not do
 

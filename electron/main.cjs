@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 let window, currentRoot, activeProcess;
 let recentRepositories = [];
@@ -9,6 +10,94 @@ const resources = () =>
   app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
 const recentFile = () => path.join(app.getPath("userData"), "recent-repositories.json");
 const rootKey = (root) => process.platform === "win32" ? root.toLowerCase() : root;
+const CACHE_VERSION = 1;
+const EXCLUDED = new Set([
+  ".git", ".venv", "venv", "env", "__pycache__", "node_modules", "dist",
+  "build", ".mypy_cache", ".pytest_cache", ".ruff_cache", "site-packages",
+]);
+const cacheDir = () => path.join(app.getPath("userData"), "analysis-cache");
+const cacheFile = (root) =>
+  path.join(cacheDir(), `${crypto.createHash("sha1").update(rootKey(root)).digest("hex")}.json`);
+
+async function fingerprint(root) {
+  const files = [];
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (EXCLUDED.has(entry.name)) continue;
+        await walk(full);
+      } else if (entry.name.endsWith(".py") || entry.name.endsWith(".pyi")) {
+        try {
+          const stat = await fs.stat(full);
+          files.push({
+            rel: path.relative(root, full).replace(/\\/g, "/"),
+            size: stat.size,
+            mtime: Math.round(stat.mtimeMs),
+          });
+        } catch {
+          /* unreadable file; the analyzer will also skip it */
+        }
+      }
+    }
+  }
+  await walk(root);
+  files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  return files;
+}
+
+async function readCache(root, fp) {
+  try {
+    const raw = JSON.parse(await fs.readFile(cacheFile(root), "utf8"));
+    if (
+      raw.version === CACHE_VERSION &&
+      raw.appVersion === app.getVersion() &&
+      JSON.stringify(raw.fingerprint) === JSON.stringify(fp)
+    )
+      return raw.result;
+  } catch {
+    /* cache miss, corrupt, or invalidated */
+  }
+  return null;
+}
+
+async function writeCache(root, result, fp) {
+  try {
+    await fs.mkdir(cacheDir(), { recursive: true });
+    const file = cacheFile(root);
+    await fs.writeFile(
+      `${file}.tmp`,
+      JSON.stringify({ version: CACHE_VERSION, appVersion: app.getVersion(), root, fingerprint: fp, result }),
+      "utf8",
+    );
+    await fs.rename(`${file}.tmp`, file);
+  } catch (error) {
+    console.warn("Could not write analysis cache:", error.message);
+  }
+}
+
+async function loadIndex(root) {
+  const fp = await fingerprint(root);
+  const cached = await readCache(root, fp);
+  if (cached) return cached;
+  const result = await analyze(root);
+  await writeCache(root, result, fp);
+  return result;
+}
+
+async function reindex(root) {
+  const result = await analyze(root);
+  await writeCache(root, result, await fingerprint(root));
+  return result;
+}
+
 async function readRecentRepositories() {
   try {
     const data = JSON.parse(await fs.readFile(recentFile(), "utf8"));
@@ -40,7 +129,7 @@ async function openRepository(root, remember = true) {
   } catch {
     throw new Error("This repository folder is unavailable. Choose another folder or remove it from recent repositories.");
   }
-  const result = await analyze(directory);
+  const result = await loadIndex(directory);
   if (remember) {
     await saveRecentRepositories([
       { root: directory, name: result.name, lastOpened: new Date().toISOString() },
@@ -188,7 +277,7 @@ app.whenReady().then(async () => {
   });
   handle("repo:refresh", () => {
     if (!currentRoot) throw new Error("Open a repository first.");
-    return analyze(currentRoot);
+    return reindex(currentRoot);
   });
   handle("repo:export", async (data) => {
     if (typeof data !== "string" || data.length > 100 * 1024 * 1024)
