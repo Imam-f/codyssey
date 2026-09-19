@@ -81,6 +81,50 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(next(s for s in file['symbols'] if s['name'] == 'U')['column'], 27)
         self.assertEqual(next(a for a in file['aliases'] if a['name'] == 'B')['chain'], ['B', 'A', 'U', 'models.User'])
 
+    def test_class_tracker_added_overridden_inherited_and_dynamic_members(self):
+        repo = self.index({'a.py': '''class Base:
+    category = "base"
+    def save(self): pass
+    @property
+    def label(self): return self._label
+    def prepare(self):
+        self.late = True
+
+class Child(Base):
+    category = "child"
+    enabled: bool
+    def __init__(self):
+        self.ready = True
+    def save(self): pass
+    def load(self):
+        self.cache = {}
+'''})
+        base, child = repo['files'][0]['classes']
+        tracker = child['memberTracker']
+        self.assertEqual({m['name'] for m in tracker['addedMethods']}, {'__init__', 'load'})
+        self.assertEqual({m['name'] for m in tracker['overriddenMethods']}, {'save'})
+        self.assertEqual({m['name'] for m in tracker['inheritedMethods']}, {'prepare'})
+        self.assertEqual({m['name'] for m in tracker['overriddenProperties']}, {'category'})
+        self.assertEqual({m['name'] for m in tracker['inheritedProperties']}, {'label', 'late'})
+        self.assertEqual({m['name'] for m in tracker['dynamicProperties']}, {'cache'})
+        self.assertEqual({m['name'] for m in tracker['addedProperties']}, {'enabled', 'ready', 'cache'})
+        cache = tracker['dynamicProperties'][0]
+        self.assertEqual((cache['definedIn'], cache['line'], cache['column']), ('load', 16, 13))
+        self.assertTrue(next(m for m in base['memberTracker']['dynamicProperties'] if m['name'] == 'late')['dynamic'])
+
+    def test_class_tracker_ignores_static_and_class_method_attributes(self):
+        cls = self.index({'a.py': '''class Example:
+    @staticmethod
+    def static(self):
+        self.not_instance = 1
+    @classmethod
+    def configure(cls):
+        cls.class_value = 2
+    def initialize(this):
+        this.instance_value = 3
+'''})['files'][0]['classes'][0]
+        self.assertEqual({m['name'] for m in cls['memberTracker']['dynamicProperties']}, {'instance_value'})
+
 
 class CallGraphTests(unittest.TestCase):
     index = AnalyzerTests.index

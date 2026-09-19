@@ -49,6 +49,7 @@
         "filter": [
           "analyzer.py",
           "callgraph.py",
+          "class_tracker.py",
           "definitions.py"
         ]
       },

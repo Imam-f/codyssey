@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import tokenize
 from callgraph import link_calls
+from class_tracker import track_classes
 from definitions import link_definitions
 
 EXCLUDED = {'.git', '.venv', 'venv', 'env', '__pycache__', 'node_modules', 'dist', 'build', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'site-packages'}
@@ -354,6 +355,7 @@ def analyze(root):
         if len(files) >= MAX_FILES: break
     link_repository(files)
     link_definitions(files)
+    track_classes(files)
     call_graph = link_calls(files)
     return {'name': root.name, 'root': str(root), 'files': files, 'diagnostics': diagnostics, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
 
