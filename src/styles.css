@@ -234,6 +234,12 @@ i {
   width: 100%;
   font-size: 11px;
 }
+.filter input:focus-visible {
+  outline: 0;
+}
+.filter:focus-within {
+  border-color: var(--accent);
+}
 .filter kbd {
   border: 0;
   padding: 0;

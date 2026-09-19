@@ -18,6 +18,8 @@ import {
   Maximize2,
 } from "lucide-react";
 
+const MAX_PER_COLUMN = 8;
+
 export function CallRelations({ graph, focusId, onNavigate, onFocus }) {
   const node = graph?.nodes.find((n) => n.id === focusId);
   if (!node || node.external) return null;
@@ -128,6 +130,13 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
   const filtered = choices.filter((n) =>
     `${n.label} ${n.path}`.toLowerCase().includes(query.toLowerCase()),
   );
+  const chunk = (arr, size) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+  const callerColumns = chunk(incoming, MAX_PER_COLUMN);
+  const calleeColumns = chunk(outgoing, MAX_PER_COLUMN);
 
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [flowSize, setFlowSize] = useState({ width: 0, height: 0 });
@@ -477,17 +486,23 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                   ))}
                 </svg>
                 {direction !== "outgoing" && (
-                  <section className="call-column callers">
+                  <div className="call-side callers">
                     <h3>
                       CALLED BY <span className="count">{incoming.length}</span>
                     </h3>
-                    {incoming.map((edge) =>
-                      nodeCard(byId.get(edge.from), edge, "left"),
-                    )}
-                    {!incoming.length && (
-                      <p className="call-empty">No indexed callers</p>
-                    )}
-                  </section>
+                    <div className="call-side-columns">
+                      {callerColumns.map((edges, i) => (
+                        <div className="call-column" key={`callers-${i}`}>
+                          {edges.map((edge) =>
+                            nodeCard(byId.get(edge.from), edge, "left"),
+                          )}
+                        </div>
+                      ))}
+                      {!incoming.length && (
+                        <p className="call-empty">No indexed callers</p>
+                      )}
+                    </div>
+                  </div>
                 )}
                 <section className="call-column selected-function">
                   <h3>SELECTED FUNCTION</h3>
@@ -500,19 +515,25 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                   )}
                 </section>
                 {direction !== "incoming" && (
-                  <section className="call-column callees">
+                  <div className="call-side callees">
                     <h3>
                       CALLS <span className="count">{outgoing.length}</span>
                     </h3>
-                    {outgoing.map((edge) =>
-                      nodeCard(byId.get(edge.to), edge, "right"),
-                    )}
-                    {!outgoing.length && (
-                      <p className="call-empty">
-                        No {showUnresolved ? "" : "resolved "}outgoing calls
-                      </p>
-                    )}
-                  </section>
+                    <div className="call-side-columns">
+                      {calleeColumns.map((edges, i) => (
+                        <div className="call-column" key={`callees-${i}`}>
+                          {edges.map((edge) =>
+                            nodeCard(byId.get(edge.to), edge, "right"),
+                          )}
+                        </div>
+                      ))}
+                      {!outgoing.length && (
+                        <p className="call-empty">
+                          No {showUnresolved ? "" : "resolved "}outgoing calls
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

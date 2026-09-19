@@ -88,19 +88,38 @@
   font-size: 9px;
 }
 .call-flow {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(185px, 1fr));
+  display: flex;
   gap: 32px;
   padding: 24px 18px 40px;
   min-width: 670px;
-  align-items: start;
+  align-items: flex-start;
   position: relative;
   transform-origin: top left;
 }
 .call-flow.incoming,
 .call-flow.outgoing {
-  grid-template-columns: repeat(2, minmax(200px, 1fr));
   min-width: 480px;
+}
+.call-side {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.call-side-columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+.call-side h3 {
+  color: #7f8d9a;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  margin: 0;
 }
 .call-canvas {
   flex: 1;
@@ -122,6 +141,8 @@
 .call-column {
   position: relative;
   z-index: 1;
+  width: 200px;
+  flex-shrink: 0;
 }
 .call-column h3 {
   color: #7f8d9a;
