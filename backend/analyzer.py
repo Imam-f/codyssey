@@ -16,6 +16,7 @@ import tokenize
 from callgraph import link_calls
 from class_tracker import track_classes
 from definitions import link_definitions
+from typesys import analyze_types, parse_declarations, serialize_declarations
 
 EXCLUDED = {'.git', '.venv', 'venv', 'env', '__pycache__', 'node_modules', 'dist', 'build', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'site-packages'}
 MAX_FILE = 2_000_000
@@ -327,9 +328,20 @@ def analyze(root):
     root = Path(root).resolve()
     if not root.is_dir(): raise ValueError('Repository folder does not exist')
     files, diagnostics = [], []
+    declarations = {}
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not Path(directory, d).is_symlink())
         for name in sorted(names):
+            if name.endswith('.pxd'):
+                path = Path(directory, name)
+                if path.is_symlink(): continue
+                try:
+                    with tokenize.open(path) as handle: text = handle.read()
+                except (OSError, UnicodeError, ValueError) as exc:
+                    diagnostics.append({'path': path.relative_to(root).as_posix(), 'line': 1, 'severity': 'error', 'message': str(exc)})
+                    continue
+                declarations[path.relative_to(root).as_posix()] = text
+                continue
             if not name.endswith(('.py', '.pyi')): continue
             path = Path(directory, name)
             relative = path.relative_to(root).as_posix()
@@ -357,7 +369,17 @@ def analyze(root):
     link_definitions(files)
     track_classes(files)
     call_graph = link_calls(files)
-    return {'name': root.name, 'root': str(root), 'files': files, 'diagnostics': diagnostics, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
+
+    declarations_by_path = {}
+    for file in files:
+        stem = file['path'].rsplit('.', 1)[0]
+        pxd_path = stem + '.pxd'
+        decl = parse_declarations(declarations.get(pxd_path, ''), pxd_path)
+        declarations_by_path[file['path']] = decl
+        file['declaration'] = serialize_declarations(decl, pxd_path)
+    type_errors = analyze_types(files, declarations_by_path)
+
+    return {'name': root.name, 'root': str(root), 'files': files, 'diagnostics': diagnostics, 'typeErrors': type_errors, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
 
 
 def link_repository(files):

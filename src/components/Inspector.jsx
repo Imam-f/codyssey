@@ -93,6 +93,28 @@ const Inspector = forwardRef(function Inspector(
                   );
                 })}
             </div>
+            {selected.computedType && (
+              <div className="detail-section">
+                <div className="section-label">CHECKED TYPE</div>
+                <div className="type-value checked">{selected.computedType}</div>
+                <div className="type-badges">
+                  {selected.mutable && <span className="badge badge-mut">mutable</span>}
+                  {selected.effect && selected.effect !== "unknown" && (
+                    <span className="badge badge-effect">{selected.effect}</span>
+                  )}
+                </div>
+                {selected.closures?.length > 0 && (
+                  <div className="closure-list">
+                    {selected.closures.map((c, i) => (
+                      <span className="closure" key={i}>
+                        {c.name}: {c.type}
+                        {c.mutable ? " (mut)" : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="detail-section">
               <div className="section-label">DECLARATION</div>
               <button

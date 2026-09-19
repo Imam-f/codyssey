@@ -34,7 +34,7 @@ async function fingerprint(root) {
       if (entry.isDirectory()) {
         if (EXCLUDED.has(entry.name)) continue;
         await walk(full);
-      } else if (entry.name.endsWith(".py") || entry.name.endsWith(".pyi")) {
+      } else if (entry.name.endsWith(".py") || entry.name.endsWith(".pyi") || entry.name.endsWith(".pxd")) {
         try {
           const stat = await fs.stat(full);
           files.push({
@@ -277,6 +277,21 @@ app.whenReady().then(async () => {
   });
   handle("repo:refresh", () => {
     if (!currentRoot) throw new Error("Open a repository first.");
+    return reindex(currentRoot);
+  });
+  handle("types:save", async (relPath, text) => {
+    if (!currentRoot) throw new Error("Open a repository first.");
+    if (typeof relPath !== "string" || typeof text !== "string" || text.length > 2 * 1024 * 1024)
+      throw new Error("Invalid declaration");
+    const rel = relPath.replace(/\\/g, "/");
+    if (!rel.endsWith(".py") && !rel.endsWith(".pyi"))
+      throw new Error("Declarations attach to a .py source file.");
+    const pxdRel = rel.replace(/\.(py|pyi)$/, ".pxd");
+    const target = path.join(currentRoot, ...pxdRel.split("/"));
+    if (!target.startsWith(path.resolve(currentRoot)))
+      throw new Error("Declaration path escapes the repository.");
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, text, "utf8");
     return reindex(currentRoot);
   });
   handle("repo:export", async (data) => {

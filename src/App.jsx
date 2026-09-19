@@ -119,6 +119,7 @@ function App() {
   );
   const aliases = file?.aliases || [];
   const diagnostics = repo?.diagnostics || [];
+  const typeErrors = repo?.typeErrors || [];
 
   async function load(method, ...args) {
     if (loadingRef.current) return;
@@ -339,6 +340,21 @@ function App() {
       setError(e.message);
     }
   }
+  async function saveTypes(path, text) {
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api.saveTypes(path, text);
+      if (!data) return;
+      setRepo(data);
+      setNotice("Type declarations applied");
+    } catch (e) {
+      setError(e.message);
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     const keydown = (e) => {
       if (repo && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
@@ -512,6 +528,7 @@ function App() {
               scopeFilter={scopeFilter}
               setScopeFilter={setScopeFilter}
               diagnostics={diagnostics}
+              typeErrors={typeErrors}
               findRef={findRef}
               symbolQuery={symbolQuery}
               setSymbolQuery={setSymbolQuery}
@@ -523,6 +540,7 @@ function App() {
               busy={busy}
               onScroll={handleSourceScroll}
               clearTabState={clearTabState}
+              saveTypes={saveTypes}
             />
           </div>
           <div

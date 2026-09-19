@@ -32,6 +32,9 @@ export const api = window.codyssey || {
     );
   },
   refresh: () => api.sample(),
+  saveTypes: async () => {
+    throw new Error("Type declarations require the Electron desktop app.");
+  },
   recent: async () => [],
   openRecent: async () => api.open(),
   removeRecent: async () => [],

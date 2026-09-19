@@ -15,10 +15,12 @@ import {
   CircleAlert,
   Check,
   ArrowUpRight,
+  FileType2,
 } from "lucide-react";
 import { Icon, basename } from "../util";
 import Resizer from "./Resizer";
 import SourceMinimap from "./SourceMinimap";
+import TypeEditor from "./TypeEditor";
 
 function indentWidth(line) {
   let width = 0;
@@ -80,6 +82,7 @@ export default function SourceView({
   scopeFilter,
   setScopeFilter,
   diagnostics,
+  typeErrors,
   findRef,
   symbolQuery,
   setSymbolQuery,
@@ -91,8 +94,10 @@ export default function SourceView({
   busy,
   onScroll,
   clearTabState,
+  saveTypes,
 }) {
   const bottomRef = useRef(null);
+  const [typeEditor, setTypeEditor] = useState(false);
   const [viewport, setViewport] = useState({
     scrollTop: 0,
     scrollHeight: 1,
@@ -229,6 +234,14 @@ export default function SourceView({
           </span>
         )}
         <span className="breadcrumb-end">{file?.lines || 0} lines</span>
+        <button
+          className={`types-toggle ${typeEditor ? "active" : ""}`}
+          title="Edit the sidecar type declarations (.pxd)"
+          onClick={() => setTypeEditor((v) => !v)}
+        >
+          <FileType2 size={13} />
+          Types
+        </button>
       </div>
       <div className="source-shell">
         <div
@@ -357,7 +370,7 @@ export default function SourceView({
             </div>
           )}
         </div>
-        {file && (
+        {file && !typeEditor && (
           <SourceMinimap
             file={file}
             path={path}
@@ -374,6 +387,15 @@ export default function SourceView({
             referencesByLine={referencesByLine}
             activeScope={activeScope}
             diagnostics={diagnostics}
+          />
+        )}
+        {file && typeEditor && (
+          <TypeEditor
+            file={file}
+            path={path}
+            onSave={saveTypes}
+            onClose={() => setTypeEditor(false)}
+            busy={busy}
           />
         )}
       </div>
@@ -407,8 +429,10 @@ export default function SourceView({
             onClick={() => setBottom("diagnostics")}
           >
             Problems
-            <span className={`count ${diagnostics.length ? "warn" : ""}`}>
-              {diagnostics.length}
+            <span
+              className={`count ${diagnostics.length || typeErrors.length ? "warn" : ""}`}
+            >
+              {diagnostics.length + typeErrors.length}
             </span>
           </button>
           <label className="scope-toggle">
@@ -507,20 +531,35 @@ export default function SourceView({
                 </tbody>
               </table>
             </>
-          ) : diagnostics.length ? (
-            diagnostics.map((d, i) => (
-              <button
-                key={i}
-                className="diagnostic"
-                onClick={() => navigate(d)}
-              >
-                <CircleAlert size={14} />
-                <span>{d.message}</span>
-                <small>
-                  {d.path}:{d.line}
-                </small>
-              </button>
-            ))
+          ) : diagnostics.length || typeErrors.length ? (
+            <>
+              {typeErrors.map((d, i) => (
+                <button
+                  key={`t${i}`}
+                  className="diagnostic"
+                  onClick={() => navigate(d)}
+                >
+                  <CircleAlert size={14} />
+                  <span>{d.message}</span>
+                  <small>
+                    {d.path}:{d.line}
+                  </small>
+                </button>
+              ))}
+              {diagnostics.map((d, i) => (
+                <button
+                  key={i}
+                  className="diagnostic"
+                  onClick={() => navigate(d)}
+                >
+                  <CircleAlert size={14} />
+                  <span>{d.message}</span>
+                  <small>
+                    {d.path}:{d.line}
+                  </small>
+                </button>
+              ))}
+            </>
           ) : (
             <div className="no-problems">
               <Check size={15} />

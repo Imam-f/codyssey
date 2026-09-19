@@ -885,3 +885,130 @@ i {
   color: #91bfbb;
   overflow-wrap: anywhere;
 }
+.type-value.checked {
+  color: #b4a4df;
+}
+.type-badges {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 9px;
+  letter-spacing: 0.5px;
+}
+.badge-mut {
+  color: #e2c08d;
+  background: #3a2f1d;
+}
+.badge-effect {
+  color: #9fd6a9;
+  background: #1d3a24;
+}
+.closure-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.closure {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #a0adbd;
+  background: #1a1f26;
+  border: 1px solid #282d35;
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.types-toggle {
+  margin-left: 10px;
+  font-size: 10px;
+  color: #8d9ba9;
+}
+.types-toggle.active {
+  color: #b4a4df;
+  background: #1c1f2b;
+}
+
+.type-editor {
+  width: 320px;
+  flex: 0 0 320px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0e1114;
+  border-left: 1px solid #252b31;
+}
+.type-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #252b31;
+}
+.type-editor-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #8d9ba9;
+}
+.type-editor-header button {
+  padding: 4px 6px;
+  font-size: 10px;
+}
+.type-editor textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  background: #101317;
+  color: #d5dbe4;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px;
+  outline: 0;
+  white-space: pre;
+}
+.type-editor textarea::placeholder {
+  color: #4c5562;
+}
+.type-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid #252b31;
+  font-size: 9px;
+  color: #56616e;
+}
+.type-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+}
+.type-status-ok {
+  color: #9fd6a9;
+}
+.type-status-error {
+  color: #e08d8d;
+}
+.type-status-busy {
+  color: #8d9ba9;
+}
+.type-hint {
+  margin-left: auto;
+  color: #4c5562;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

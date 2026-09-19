@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("codyssey", {
   close: () => ipcRenderer.invoke("repo:close"),
   openInVSCode: () => ipcRenderer.invoke("repo:open-in-vscode"),
   refresh: () => ipcRenderer.invoke("repo:refresh"),
+  saveTypes: (path, text) => ipcRenderer.invoke("types:save", path, text),
   export: (data) => ipcRenderer.invoke("repo:export", data),
 });

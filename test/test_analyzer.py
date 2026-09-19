@@ -241,4 +241,90 @@ class DefinitionTests(unittest.TestCase):
         self.assertEqual(attribute['definition']['path'],'lib.py')
 
 
+class TypeSystemTests(unittest.TestCase):
+    index = AnalyzerTests.index
+
+    def symbols(self, repo, path):
+        file = next(f for f in repo['files'] if f['path'] == path)
+        return {s['name']: s for s in file['symbols']}
+
+    def errors(self, repo):
+        return {(e['line'], e['code']) for e in repo.get('typeErrors', [])}
+
+    def test_sidecar_declarations_override_and_augment_inference(self):
+        repo = self.index({
+            'app.py': 'class User: pass\ndef fail() -> int:\n    raise RuntimeError("boom")\ndef use():\n    return fail()\n',
+            'app.pxd': 'prop fail() -> never\nprop use() -> int\n',
+        })
+        file = repo['files'][0]
+        self.assertEqual(file['declaration']['path'], 'app.pxd')
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['fail']['computedType'], '() -> never')
+        self.assertEqual(symbols['use']['computedType'], '() -> int')
+
+    def test_block_form_property_declaration_is_a_valid_expression(self):
+        repo = self.index({
+            'app.py': 'data = {"name": "codyssey"}\n',
+            'app.pxd': 'prop data:\n    { name: str }\n',
+        })
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['data']['computedType'], '{name: str}')
+
+    def test_raise_is_never_and_union_drops_never(self):
+        repo = self.index({'app.py': 'def stop():\n    raise ValueError("x")\ndef pick(flag):\n    if flag:\n        return 1\n    raise RuntimeError("no")\n'})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['stop']['computedType'], '() -> never')
+        self.assertEqual(symbols['pick']['computedType'], '(flag: ?) -> int')
+
+    def test_never_argument_and_never_parameter_cannot_be_called(self):
+        repo = self.index({
+            'app.py': 'def fail():\n    raise RuntimeError("boom")\ndef needs(x):\n    return x\ndef run():\n    return needs(fail())\n',
+            'app.pxd': 'prop fail() -> never\n',
+        })
+        errors = self.errors(repo)
+        self.assertIn((6, 'never-arg'), errors)
+        repo = self.index({
+            'app.py': 'def needs(x):\n    return x\ndef run():\n    return needs(1)\n',
+            'app.pxd': 'prop needs(x: never) -> never\n',
+        })
+        errors = self.errors(repo)
+        self.assertIn((4, 'never-param'), errors)
+
+    def test_dict_member_and_variant_sum_types(self):
+        repo = self.index({
+            'app.py': 'def get(d):\n    return d["name"]\ndef pick(flag):\n    if flag:\n        return 1\n    return "x"\n',
+            'app.pxd': 'prop get(d: { name: str, count: int }) -> str\nprop pick(flag: bool) -> int | str\n',
+        })
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['pick']['computedType'], '(flag: bool) -> int | str')
+        self.assertEqual(symbols['get']['computedType'], '(d: {name: str, count: int}) -> str')
+
+    def test_closure_capture_analysis(self):
+        repo = self.index({'app.py': 'def outer():\n    total = 0\n    def inner():\n        return total + 1\n    return inner\n'})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['outer']['computedType'], '() -> () -> int')
+        self.assertEqual(symbols['inner']['closures'], [{'name': 'total', 'type': 'int', 'mutable': False}])
+
+    def test_mutability_status(self):
+        repo = self.index({'app.py': 'x = 1\ny = []\n'})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertFalse(symbols['x']['mutable'])
+        self.assertTrue(symbols['y']['mutable'])
+        repo = self.index({'app.py': 'data = 1\n', 'app.pxd': 'mut prop data: int\n'})
+        self.assertTrue(self.symbols(repo, 'app.py')['data']['mutable'])
+
+    def test_side_effect_tags_and_purity_violation(self):
+        repo = self.index({'app.py': '@side_effect\ndef write(row):\n    pass\n@pure\ndef read():\n    write(1)\n    return 0\n'})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['write']['effect'], 'side_effect')
+        self.assertEqual(symbols['read']['effect'], 'pure')
+        self.assertIn((6, 'purity'), self.errors(repo))
+
+    def test_type_alias_declaration(self):
+        repo = self.index({'app.py': 'def get(row):\n    return row\n', 'app.pxd': 'type Row = { id: int }\nprop get(row: Row) -> Row\n'})
+        file = repo['files'][0]
+        self.assertIn('Row', file['declaration']['aliases'])
+        self.assertEqual(file['declaration']['aliases']['Row']['display'], '{id: int}')
+
+
 if __name__ == '__main__': unittest.main(verbosity=2)
