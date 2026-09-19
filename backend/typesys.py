@@ -689,7 +689,7 @@ class TypeChecker(ast.NodeVisitor):
         value_type = self.visit(node.value)
         for target in node.targets:
             if isinstance(target, ast.Name):
-                self.bind_name(target.id, value_type, mutable=False)
+                self.bind_name(target.id, value_type, mutable=False, line=target.lineno)
             elif isinstance(target, ast.Attribute):
                 self.visit(target.value)
         return value_type
@@ -699,15 +699,15 @@ class TypeChecker(ast.NodeVisitor):
         if node.value:
             self.visit(node.value)
         if isinstance(node.target, ast.Name):
-            self.bind_name(node.target.id, declared, mutable=False, declared_type=True)
+            self.bind_name(node.target.id, declared, mutable=False, declared_type=True, line=node.target.lineno)
         return declared
 
     def visit_AugAssign(self, node):
         if isinstance(node.target, ast.Name):
-            self.bind_name(node.target.id, self.visit(node.value), mutable=True)
+            self.bind_name(node.target.id, self.visit(node.value), mutable=True, line=node.target.lineno)
         return Unknown()
 
-    def bind_name(self, name, type_, mutable=False, declared_type=False):
+    def bind_name(self, name, type_, mutable=False, declared_type=False, line=None):
         mutable = mutable or is_mutable_type(type_)
         existing = self.current()["bindings"].get(name)
         if existing:
@@ -718,7 +718,7 @@ class TypeChecker(ast.NodeVisitor):
             return
         self.current()["bindings"][name] = Binding(type_, mutable=mutable, declared=declared_type)
         self.facts.append(Fact(
-            name=name, scope=self.current()["name"], line=1,
+            name=name, scope=self.current()["name"], line=line if line is not None else 1,
             type=type_, mutable=mutable,
         ))
 
@@ -845,9 +845,11 @@ class TypeChecker(ast.NodeVisitor):
             params = [receiver] + params
 
         self.push("function", node.name)
+        arg_lines = {a.arg: a.lineno for a in args}
         for name, ann in params:
             self.current()["bindings"][name] = Binding(ann)
-            self.facts.append(Fact(name=name, scope=node.name, line=getattr(node, "lineno", 1), type=ann))
+            line = arg_lines.get(name, getattr(node, "lineno", 1))
+            self.facts.append(Fact(name=name, scope=node.name, line=line, type=ann))
         function = {"captures": [], "seen_scopes": set()}
         self.function_stack.append(function)
         prev_returns, prev_diverges = self.returns, self.diverges
@@ -910,7 +912,7 @@ class TypeChecker(ast.NodeVisitor):
     def visit_NamedExpr(self, node):
         value = self.visit(node.value)
         if isinstance(node.target, ast.Name):
-            self.bind_name(node.target.id, value)
+            self.bind_name(node.target.id, value, line=node.target.lineno)
         return value
 
     def visit_Match(self, node):
@@ -1183,22 +1185,22 @@ def _attach_member_types(files, members: MemberTable):
 
 def _attach_facts(file, facts):
     symbols = file["symbols"]
-    scope_name_by_id = {}
+    by_key = {}
+    by_scope_name = {}
     for s in symbols:
-        key = (s["scopeName"], s["name"], s["line"])
-        scope_name_by_id.setdefault(key, []).append(s)
+        by_key.setdefault((s["scopeName"], s["name"], s["line"]), []).append(s)
+        by_scope_name.setdefault((s["scopeName"], s["name"]), []).append(s)
 
     for fact in facts:
         # Match facts to symbols by (scopeName, name, line). Function facts are
         # keyed by the enclosing scope name; locals by their function name.
-        key = (fact.scope, fact.name, fact.line)
-        matches = scope_name_by_id.get(key)
+        matches = by_key.get((fact.scope, fact.name, fact.line))
         if not matches:
-            # Fall back to matching by name + scope, ignoring the line.
-            for (scope, name, line), symbols_here in scope_name_by_id.items():
-                if scope == fact.scope and name == fact.name:
-                    matches = symbols_here
-                    break
+            # Fall back to the same name within the scope, choosing the symbol
+            # on the closest line (declaration-seeded facts use line 1).
+            candidates = by_scope_name.get((fact.scope, fact.name))
+            if candidates:
+                matches = [min(candidates, key=lambda s: abs(s["line"] - fact.line))]
         if not matches:
             continue
         symbol = matches[0]

@@ -420,5 +420,22 @@ class Child(Base):
         self.assertEqual(members['category']['type'], 'str')
         self.assertEqual(members['count']['type'], 'int')
 
+    def test_self_resolves_with_multiline_signatures(self):
+        repo = self.index({'app.py': '''class A:
+    def __init__(
+        self,
+        x,
+    ):
+        self.x = x
+class B:
+    def __init__(
+        self,
+        y,
+    ):
+        self.y = y
+'''})
+        selfs = [s for s in repo['files'][0]['symbols'] if s['name'] == 'self']
+        self.assertEqual({s['computedType'] for s in selfs}, {'A', 'B'})
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)
