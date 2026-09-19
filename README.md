@@ -6,6 +6,20 @@
 
 A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a file explorer and outline, Tree-sitter source viewer, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph.
 
+## Screenshots
+
+### Welcome page
+
+Open a Python repository, return to a recent project, or explore the bundled sample.
+
+![Codyssey welcome page with repository-opening actions and a recent repositories section](docs/screenshots/welcome.png)
+
+### Source explorer
+
+Browse highlighted Python source alongside symbol details, types, and references.
+
+![Codyssey source explorer showing the sample repository, a selected symbol, and its references](docs/screenshots/source.png)
+
 ## Run
 
 Requires Node.js 22.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) on PATH. `uv` selects or installs Python 3.12+ for the analyzer; no Python packages are required.
