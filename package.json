@@ -1,0 +1,62 @@
+{
+  "name": "codyssey",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "a developer tool where you anger the gods and commit atrocities against humanity",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "node scripts/sample.mjs && vite build",
+    "sample": "node scripts/sample.mjs",
+    "start": "electron .",
+    "test": "uv run --script backend/test_analyzer.py",
+    "test:ui": "node scripts/smoke.mjs",
+    "postinstall": "node scripts/assets.mjs",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.577.0",
+    "web-tree-sitter": "0.25.10",
+    "tree-sitter-python": "0.25.0"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0",
+    "electron": "44.4.3",
+    "electron-builder": "^26.0.12",
+    "@playwright/test": "^1.58.2"
+  },
+  "build": {
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "appId": "dev.codyssey.app",
+    "productName": "Codyssey",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "analyzer.py",
+          "callgraph.py"
+        ]
+      },
+      {
+        "from": "sample",
+        "to": "sample"
+      }
+    ],
+    "win": {
+      "target": "portable"
+    }
+  }
+}
