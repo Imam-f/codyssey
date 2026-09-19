@@ -89,7 +89,7 @@
 }
 .call-flow {
   display: flex;
-  gap: 32px;
+  gap: 40px;
   padding: 24px 18px 40px;
   min-width: 670px;
   align-items: flex-start;
@@ -108,7 +108,7 @@
 .call-side-columns {
   display: flex;
   align-items: flex-start;
-  gap: 24px;
+  gap: 32px;
 }
 .call-side h3 {
   color: #7f8d9a;

@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 
 const MAX_PER_COLUMN = 8;
+const STAGGER = 20;
+const ARROW_LANE_GAP = 12;
 
 export function CallRelations({ graph, focusId, onNavigate, onFocus }) {
   const node = graph?.nodes.find((n) => n.id === focusId);
@@ -175,9 +177,13 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
         if (rect.bottom > maxBottom) maxBottom = rect.bottom;
       });
       setNodeRects(rects);
+      const arrowCount = Math.max(incoming.length, outgoing.length);
+      const arrowSpace = arrowCount > MAX_PER_COLUMN
+        ? 16 + arrowCount * ARROW_LANE_GAP
+        : 0;
       setFlowSize({
         width: Math.max(flow.offsetWidth, maxRight + 18),
-        height: Math.max(flow.offsetHeight, maxBottom + 40),
+        height: Math.max(flow.offsetHeight, maxBottom + 40, maxBottom + arrowSpace),
       });
     };
     measure();
@@ -267,10 +273,29 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
     } catch {}
   }
 
-  function arrowPath(from, to) {
-    const busY = flowSize.height - 20;
-    const hop = 10;
-    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${busY} H ${to.left - hop} V ${to.centerY} H ${to.left}`;
+  function arrowPath(from, to, offset = 0, lane = 0) {
+    const hop = 12 + lane * 2;
+    const y = to.centerY + offset * 4;
+    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${y} H ${to.left}`;
+  }
+
+  function wrappedArrowPath(from, to, lane, offset = 0) {
+    const hop = 12 + (lane % MAX_PER_COLUMN) * 2;
+    const busY = Math.max(...Object.values(nodeRects).map((rect) => rect.bottom))
+      + 16
+      + lane * ARROW_LANE_GAP;
+    const targetY = to.centerY + offset * 4;
+    return `M ${from.right} ${from.centerY} H ${from.right + hop} V ${busY} H ${to.left - hop} V ${targetY} H ${to.left}`;
+  }
+
+  function stagger(index, count) {
+    return count > 1 ? index - (count - 1) / 2 : 0;
+  }
+
+  function columnOffset(index, total) {
+    const columnStart = Math.floor(index / MAX_PER_COLUMN) * MAX_PER_COLUMN;
+    const columnSize = Math.min(MAX_PER_COLUMN, total - columnStart);
+    return stagger(index - columnStart, columnSize);
   }
 
   const arrows = [];
@@ -278,15 +303,49 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
     const center = nodeRects[`center:${focus.id}`];
     if (center) {
       if (direction !== "outgoing")
-        for (const edge of incoming) {
+        incoming.forEach((edge, i) => {
           const from = nodeRects[`left:${edge.from}`];
-          if (from) arrows.push({ d: arrowPath(from, center), key: `i:${edge.from}` });
-        }
+          if (from)
+            arrows.push({
+              d:
+                i >= MAX_PER_COLUMN
+                  ? wrappedArrowPath(
+                      from,
+                      center,
+                      i,
+                      columnOffset(i, incoming.length),
+                    )
+                  : arrowPath(
+                      from,
+                      center,
+                      columnOffset(i, incoming.length),
+                      i % MAX_PER_COLUMN,
+                    ),
+              key: `i:${edge.from}`,
+            });
+        });
       if (direction !== "incoming")
-        for (const edge of outgoing) {
+        outgoing.forEach((edge, i) => {
           const to = nodeRects[`right:${edge.to}`];
-          if (to) arrows.push({ d: arrowPath(center, to), key: `o:${edge.to}` });
-        }
+          if (to)
+            arrows.push({
+              d:
+                i >= MAX_PER_COLUMN
+                  ? wrappedArrowPath(
+                      center,
+                      to,
+                      i,
+                      columnOffset(i, outgoing.length),
+                    )
+                  : arrowPath(
+                      center,
+                      to,
+                      columnOffset(i, outgoing.length),
+                      i % MAX_PER_COLUMN,
+                    ),
+              key: `o:${edge.to}`,
+            });
+        });
     }
   }
 
@@ -474,10 +533,11 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                     <marker
                       id="call-arrow"
                       viewBox="0 0 10 10"
-                      refX="9"
+                      refX="10"
                       refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
+                      markerWidth="10"
+                      markerHeight="10"
+                      markerUnits="userSpaceOnUse"
                       orient="auto"
                     >
                       <path d="M 0 0 L 10 5 L 0 10 Z" fill="#778f81" />
@@ -490,6 +550,8 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                       fill="none"
                       stroke="#778f81"
                       strokeWidth="1.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                       markerEnd="url(#call-arrow)"
                     />
                   ))}
@@ -501,7 +563,11 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                     </h3>
                     <div className="call-side-columns">
                       {callerColumns.map((edges, i) => (
-                        <div className="call-column" key={`callers-${i}`}>
+                        <div
+                          className="call-column"
+                          key={`callers-${i}`}
+                          style={{ marginTop: i * STAGGER }}
+                        >
                           {edges.map((edge) =>
                             nodeCard(byId.get(edge.from), edge, "left"),
                           )}
@@ -530,7 +596,11 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
                     </h3>
                     <div className="call-side-columns">
                       {calleeColumns.map((edges, i) => (
-                        <div className="call-column" key={`callees-${i}`}>
+                        <div
+                          className="call-column"
+                          key={`callees-${i}`}
+                          style={{ marginTop: i * STAGGER }}
+                        >
                           {edges.map((edge) =>
                             nodeCard(byId.get(edge.to), edge, "right"),
                           )}
