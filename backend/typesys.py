@@ -428,11 +428,12 @@ class Fact:
 
 
 class TypeChecker(ast.NodeVisitor):
-    def __init__(self, file, declarations: Declarations, resolver):
+    def __init__(self, file, declarations: Declarations, resolver, members: MemberTable):
         self.file = file
         self.path = file["path"]
         self.declarations = declarations
         self.resolver = resolver  # callable(name) -> Type | None, cross-file/import
+        self.members = members
         self.scopes: list[dict] = [{"kind": "module", "name": "<module>", "bindings": {}}]
         self.errors: list[dict] = []
         self.facts: list[Fact] = []
@@ -573,6 +574,10 @@ class TypeChecker(ast.NodeVisitor):
                     return field_type
         if isinstance(receiver, Container) and receiver.shape == "dict" and node.attr == "items":
             return Callable((), Container("list", Container("tuple", Unknown())))
+        if isinstance(receiver, Named):
+            member = self.members.lookup(receiver, node.attr)
+            if member is not None:
+                return member
         return Unknown()
 
     def visit_Subscript(self, node):
@@ -591,15 +596,15 @@ class TypeChecker(ast.NodeVisitor):
         return Unknown()
 
     def visit_List(self, node):
-        element = make_union(self.visit(e) for e in node.elts)
+        element = make_union(self.visit(e) for e in node.elts) if node.elts else Unknown()
         return Container("list", element)
 
     def visit_Set(self, node):
-        element = make_union(self.visit(e) for e in node.elts)
+        element = make_union(self.visit(e) for e in node.elts) if node.elts else Unknown()
         return Container("set", element)
 
     def visit_Tuple(self, node):
-        element = make_union(self.visit(e) for e in node.elts)
+        element = make_union(self.visit(e) for e in node.elts) if node.elts else Unknown()
         return Container("tuple", element)
 
     def visit_Dict(self, node):
@@ -914,29 +919,160 @@ class TypeChecker(ast.NodeVisitor):
         return self.visit_With(node)
 
 
-def _bindings_from_symbol(symbol) -> Type:
-    """Convert an indexed symbol's stored type into a Type."""
+def _attach_targets(t: Type, ids: list[str]) -> Type:
+    """Attach resolved class ids to Named types inside a parsed type."""
+    if isinstance(t, Named) and t.symbol_id is None and ids:
+        return Named(t.name, ids[0])
+    if isinstance(t, Union):
+        remaining = list(ids)
+        members = []
+        for member in t.members:
+            if isinstance(member, Named) and member.symbol_id is None and remaining:
+                members.append(Named(member.name, remaining.pop(0)))
+            else:
+                members.append(member)
+        return Union(tuple(members))
+    return t
+
+
+def symbol_type(symbol) -> Type:
+    """Convert an indexed symbol's stored type into a Type.
+
+    Annotations are parsed (so generics, unions, and containers survive);
+    inferred literal types use their recorded primitive/container name.
+    """
+    source = symbol.get("typeSource")
     raw = symbol.get("type", "unknown")
-    if symbol.get("typeSource") == "unknown" or raw in ("unknown", "", None):
-        return Unknown()
-    if raw == "list":
-        return Container("list", Unknown())
-    if raw == "dict":
-        return Container("dict", Unknown(), key=Unknown())
-    if raw == "set":
-        return Container("set", Unknown())
-    if raw == "tuple":
-        return Container("tuple", Unknown())
-    if raw in PRIMITIVES and raw not in ("list", "dict", "set", "tuple"):
-        return Primitive(raw)
     targets = symbol.get("typeTargets") or []
-    return Named(raw, targets[0] if targets else None)
+    if source == "annotation":
+        return _attach_targets(parse_type(raw), targets)
+    if source == "inferred":
+        if raw == "list":
+            return Container("list", Unknown())
+        if raw == "dict":
+            return Container("dict", Unknown(), key=Unknown())
+        if raw == "set":
+            return Container("set", Unknown())
+        if raw == "tuple":
+            return Container("tuple", Unknown())
+        if raw in PRIMITIVES and raw not in ("list", "dict", "set", "tuple"):
+            return Primitive(raw)
+        return Named(raw, targets[0] if targets else None)
+    return Unknown()
+
+
+def _value_type(text: str) -> Type:
+    """Best-effort type of a literal source fragment (``True``, ``{}``, …)."""
+    if text in ("None",):
+        return Primitive("None")
+    if text in ("True", "False"):
+        return Primitive("bool")
+    try:
+        node = ast.parse(text, mode="eval").body
+    except (SyntaxError, RecursionError):
+        return Unknown()
+    if isinstance(node, ast.Constant):
+        return Primitive("None") if node.value is None else Primitive(type(node.value).__name__)
+    if isinstance(node, (ast.List, ast.ListComp)):
+        return Container("list", Unknown())
+    if isinstance(node, (ast.Dict, ast.DictComp)):
+        return Container("dict", Unknown(), key=Unknown())
+    if isinstance(node, (ast.Set, ast.SetComp)):
+        return Container("set", Unknown())
+    if isinstance(node, ast.Tuple):
+        return Container("tuple", Unknown())
+    if isinstance(node, ast.Name):
+        return Unknown()  # a bare name needs scope resolution by the caller
+    return Unknown()
+
+
+class MemberTable:
+    """Class members (methods and fields) resolved across files and inheritance."""
+
+    def __init__(self, files):
+        self.local = {}      # class symbol id -> {member: Type}
+        self.bases = {}      # class symbol id -> [base ids]
+        self.name_to_id = {}  # class name -> first class id
+
+        for file in files:
+            symbols_by_scope = {}
+            for s in file["symbols"]:
+                symbols_by_scope.setdefault(s["scopeId"], []).append(s)
+            classes_by_id = {c["id"]: c for c in file.get("classes", [])}
+            for symbol in file["symbols"]:
+                if symbol["kind"] != "class":
+                    continue
+                cid = symbol["id"]
+                cls = classes_by_id.get(cid, {})
+                self.bases[cid] = [b for b in cls.get("baseIds", []) if b]
+                self.name_to_id.setdefault(symbol["name"], cid)
+                members = {}
+                body = symbol.get("bodyScopeId")
+                for s in symbols_by_scope.get(body, []):
+                    if s["kind"] == "function":
+                        params = tuple(
+                            (p["name"], symbol_type(p))
+                            for p in symbols_by_scope.get(s.get("bodyScopeId"), [])
+                            if p["kind"] == "parameter"
+                        )
+                        members[s["name"]] = Callable(params, symbol_type(s))
+                    elif s["kind"] == "variable":
+                        members[s["name"]] = symbol_type(s)
+                # Instance fields assigned via ``self.x`` in this class's methods.
+                method_scopes = {
+                    s.get("bodyScopeId")
+                    for s in symbols_by_scope.get(body, [])
+                    if s["kind"] == "function"
+                }
+                for assignment in file.get("assignments", []):
+                    if assignment.get("scopeId") not in method_scopes:
+                        continue
+                    target = assignment.get("target", "")
+                    if not target.startswith("self."):
+                        continue
+                    attr = target[len("self."):]
+                    if attr in members:
+                        continue
+                    param_types = {
+                        p["name"]: symbol_type(p)
+                        for p in symbols_by_scope.get(assignment["scopeId"], [])
+                        if p["kind"] == "parameter"
+                    }
+                    members[attr] = self._assignment_type(assignment, param_types)
+                self.local[cid] = members
+
+    @staticmethod
+    def _assignment_type(assignment, param_types):
+        if assignment.get("annotation"):
+            return parse_type(assignment["annotation"])
+        value = assignment.get("value")
+        if value in param_types:
+            return param_types[value]
+        if value:
+            return _value_type(value)
+        return Unknown()
+
+    def _lookup_id(self, cid, attr, seen):
+        if cid is None or cid in seen:
+            return None
+        seen.add(cid)
+        if attr in self.local.get(cid, {}):
+            return self.local[cid][attr]
+        for base in self.bases.get(cid, []):
+            result = self._lookup_id(base, attr, seen)
+            if result is not None:
+                return result
+        return None
+
+    def lookup(self, named: Named, attr: str):
+        cid = named.symbol_id or self.name_to_id.get(named.name)
+        return self._lookup_id(cid, attr, set())
 
 
 def _resolver_for(file, files_by_path, exports):
     """Build a cross-file name resolver for a single file."""
     module_bindings = {
-        s["name"]: _bindings_from_symbol(s)
+        s["name"]: symbol_type(s)
         for s in file["symbols"]
         if s.get("scopeName") == "<module>"
     }
@@ -954,7 +1090,7 @@ def _resolver_for(file, files_by_path, exports):
             target = import_targets[name]
             hit = exports.get(target)
             if hit:
-                return _bindings_from_symbol(hit)
+                return symbol_type(hit)
         # A module-qualified import: ``import models as m; m.User`` resolves to
         # ``models.User``.
         return None
@@ -972,6 +1108,7 @@ def analyze_types(files, declarations_by_path):
             if s.get("scopeName") == "<module>":
                 exports[f"{module}.{s['name']}"] = s
 
+    members = MemberTable(files)
     errors: list[dict] = []
     for f in files:
         declarations = declarations_by_path.get(f["path"]) or Declarations()
@@ -980,7 +1117,7 @@ def analyze_types(files, declarations_by_path):
             tree = ast.parse(f["source"], filename=f["path"])
         except (SyntaxError, RecursionError):
             continue
-        checker = TypeChecker(f, declarations, resolver)
+        checker = TypeChecker(f, declarations, resolver, members)
         checker.visit(tree)
         errors.extend(checker.errors)
         _attach_facts(f, checker.facts)

@@ -356,5 +356,46 @@ class Child(Base):
         symbols = self.symbols(repo, 'app.py')
         self.assertEqual(symbols['get']['computedType'], '(self: Repo, key: str) -> str')
 
+    def test_member_access_and_method_call_resolution(self):
+        repo = self.index({'app.py': '''class User:
+    name: str
+    def label(self) -> str:
+        return self.name
+def field(u: User):
+    value = u.name
+    return value
+def method(u: User):
+    result = u.label()
+    return result
+'''})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['value']['computedType'], 'str')
+        self.assertEqual(symbols['result']['computedType'], 'str')
+        self.assertEqual(symbols['label']['computedType'], '(self: User) -> str')
+
+    def test_inherited_member_resolution(self):
+        repo = self.index({'app.py': '''class Base:
+    name: str
+class Child(Base):
+    pass
+def use(c: Child):
+    value = c.name
+    return value
+'''})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['value']['computedType'], 'str')
+
+    def test_instance_field_assigned_from_parameter(self):
+        repo = self.index({'app.py': '''class Repo:
+    pass
+class Service:
+    def __init__(self, repo: Repo):
+        self.repository = repo
+    def use(self):
+        return self.repository
+'''})
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['use']['computedType'], '(self: Service) -> Repo')
+
 
 if __name__ == '__main__': unittest.main(verbosity=2)
