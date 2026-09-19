@@ -582,7 +582,7 @@ i {
 .current-line .line-number {
   color: #b2c0bd;
 }
-.fold-toggle {
+.source-area .fold-toggle {
   width: 16px;
   flex-shrink: 0;
   display: flex;
@@ -594,11 +594,11 @@ i {
   user-select: none;
   border-radius: 0;
 }
-.fold-toggle:hover {
+.source-area .fold-toggle:hover {
   color: #c3ced8;
 }
-.fold-toggle:disabled,
-.fold-toggle-empty {
+.source-area .fold-toggle:disabled,
+.source-area .fold-toggle-empty {
   cursor: default;
 }
 .line-content {
