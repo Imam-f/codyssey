@@ -166,7 +166,7 @@ def display(t: Type) -> str:
         return " | ".join(display(m) for m in t.members)
     if isinstance(t, Container):
         if t.shape == "dict":
-            return f"dict[{display(t.key)}: {display(t.element)}]"
+            return f"dict[{display(t.key)}, {display(t.element)}]"
         return f"{t.shape}[{display(t.element)}]"
     if isinstance(t, Record):
         fields = ", ".join(f"{name}: {display(ft)}" for name, ft in t.fields)
