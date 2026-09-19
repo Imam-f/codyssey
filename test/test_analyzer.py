@@ -220,6 +220,21 @@ class DefinitionTests(unittest.TestCase):
         self.assertEqual(self.reference(repo,'use.py','run',4)['definition']['line'],6)
         target=self.reference(repo,'use.py','repo',5)['definition']
         self.assertEqual((target['path'],target['line']),('lib.py',5))
+        self.assertEqual(target['kind'], 'property')
+        self.assertIsNotNone(target['id'])
+
+    def test_inherited_instance_field_definition_is_selectable(self):
+        repo = self.index({'app.py': '''class Base:
+    def __init__(self, repository):
+        self.repository = repository
+class Child(Base):
+    def save(self):
+        return self.repository
+''',
+        })
+        ref = self.reference(repo, 'app.py', 'repository', 6)
+        self.assertEqual((ref['definition']['kind'], ref['definition']['line']), ('property', 3))
+        self.assertEqual(ref['symbolId'], ref['definition']['id'])
 
     def test_local_shadowing_rebinding_and_unknown_receivers(self):
         repo=self.index({'lib.py':'def work(): pass\n', 'use.py':'from lib import work\ndef run(work, obj):\n    work()\n    obj.work()\nwork = 5\nprint(work)\n'})
@@ -298,6 +313,62 @@ class TypeSystemTests(unittest.TestCase):
         symbols = self.symbols(repo, 'app.py')
         self.assertEqual(symbols['pick']['computedType'], '(flag: bool) -> int | str')
         self.assertEqual(symbols['get']['computedType'], '(d: {name: str, count: int}) -> str')
+
+    def test_common_builtin_collection_methods_are_implicitly_typed(self):
+        repo = self.index({'app.py': '''
+def mappings():
+    data = {"name": "codyssey", "count": 1}
+    keys = data.keys()
+    values = data.values()
+    items = data.items()
+    name = data.get("name")
+    copy = data.copy()
+    removed = data.pop("count")
+    return keys, values, items, name, copy, removed
+
+def sequences():
+    numbers = [1, 2]
+    numbers.append(3)
+    appended = numbers.append(4)
+    list_popped = numbers.pop()
+    list_copied = numbers.copy()
+    count = numbers.count(1)
+    text = "a,b"
+    parts = text.split(",")
+    joined = ":".join(parts)
+    return appended, list_popped, list_copied, count, parts, joined
+
+def sets():
+    tags = {"a"}
+    added = tags.add("b")
+    set_popped = tags.pop()
+    set_copied = tags.copy()
+    return added, set_popped, set_copied
+
+def annotated(data: dict[str, int], words: list[str]):
+    key_list = data.keys()
+    value_list = data.values()
+    word = words.pop()
+    return key_list, value_list, word
+'''} )
+        symbols = self.symbols(repo, 'app.py')
+        self.assertEqual(symbols['keys']['computedType'], 'list[str]')
+        self.assertEqual(symbols['values']['computedType'], 'list[str | int]')
+        self.assertEqual(symbols['items']['computedType'], 'list[tuple[str | int]]')
+        self.assertEqual(symbols['name']['computedType'], 'str | None')
+        self.assertEqual(symbols['copy']['computedType'], '{name: str, count: int}')
+        self.assertEqual(symbols['removed']['computedType'], 'int')
+        self.assertEqual(symbols['appended']['computedType'], 'None')
+        self.assertEqual(symbols['list_popped']['computedType'], 'int')
+        self.assertEqual(symbols['list_copied']['computedType'], 'list[int]')
+        self.assertEqual(symbols['count']['computedType'], 'int')
+        self.assertEqual(symbols['parts']['computedType'], 'list[str]')
+        self.assertEqual(symbols['joined']['computedType'], 'str')
+        self.assertEqual(symbols['added']['computedType'], 'None')
+        self.assertEqual(symbols['set_popped']['computedType'], 'str')
+        self.assertEqual(symbols['key_list']['computedType'], 'list[str]')
+        self.assertEqual(symbols['value_list']['computedType'], 'list[int]')
+        self.assertEqual(symbols['word']['computedType'], 'str')
 
     def test_closure_capture_analysis(self):
         repo = self.index({'app.py': 'def outer():\n    total = 0\n    def inner():\n        return total + 1\n    return inner\n'})
@@ -436,6 +507,34 @@ class B:
 '''})
         selfs = [s for s in repo['files'][0]['symbols'] if s['name'] == 'self']
         self.assertEqual({s['computedType'] for s in selfs}, {'A', 'B'})
+
+    def test_receiver_type_is_promoted_and_nested_self_is_not_a_receiver(self):
+        repo = self.index({'app.py': '''class Service:
+    def run(self):
+        def helper(self):
+            return self
+        return helper
+'''
+        })
+        file = next(f for f in repo['files'] if f['path'] == 'app.py')
+        receivers = [s for s in file['symbols'] if s['name'] == 'self']
+        method_self = next(s for s in receivers if s['scopeName'] == 'run')
+        helper_self = next(s for s in receivers if s['scopeName'] == 'helper')
+        self.assertEqual((method_self['type'], method_self['typeSource'], method_self['computedType']),
+                         ('Service', 'inferred', 'Service'))
+        self.assertEqual(helper_self['computedType'], '?')
+
+    def test_receiver_member_lookup_uses_the_exact_class_when_names_repeat(self):
+        repo = self.index({
+            'first.py': 'class Service:\n    value: int\n',
+            'second.py': '''class Service:
+    value: str
+    def read(self):
+        return self.value
+''',
+        })
+        symbols = self.symbols(repo, 'second.py')
+        self.assertEqual(symbols['read']['computedType'], '(self: Service) -> str')
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

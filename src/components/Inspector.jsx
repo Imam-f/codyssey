@@ -37,6 +37,20 @@ const Inspector = forwardRef(function Inspector(
     selected?.kind === "class" ? selected.id : selected?.typeTargets?.[0];
   const targetClass = classes.find((c) => c.id === targetClassId);
   const typeMembers = targetClass?.memberTracker?.members || [];
+  const effectiveType = selected?.computedType || selected?.type;
+  const isImplicitReceiver =
+    selected?.kind === "parameter" &&
+    (selected?.name === "self" || selected?.name === "cls") &&
+    Boolean(selected?.computedType);
+  const typeSourceLabel = isImplicitReceiver
+    ? "Inferred from enclosing class"
+    : selected?.typeSource === "annotation"
+      ? "Explicit annotation"
+      : selected?.typeSource === "inferred"
+        ? "Inferred from expression"
+        : selected?.computedType
+          ? "Inferred by type checker"
+          : "No static type available";
   return (
     <aside className="inspector" ref={ref} style={{ width: inspectorWidth }}>
       <div className="inspector-tabs">
@@ -78,14 +92,8 @@ const Inspector = forwardRef(function Inspector(
             </div>
             <div className="detail-section">
               <div className="section-label">TYPE</div>
-              <div className="type-value">{selected.type}</div>
-              <div className="type-source">
-                {selected.typeSource === "annotation"
-                  ? "Explicit annotation"
-                  : selected.typeSource === "inferred"
-                    ? "Inferred from expression"
-                    : "No static type available"}
-              </div>
+              <div className="type-value">{effectiveType}</div>
+              <div className="type-source">{typeSourceLabel}</div>
               {selected.typeTargets?.length > 0 &&
                 selected.typeTargets.map((id) => {
                   const target = symbols.find((s) => s.id === id);
@@ -104,7 +112,7 @@ const Inspector = forwardRef(function Inspector(
                   );
                 })}
             </div>
-            {selected.computedType && (
+            {selected.computedType && selected.computedType !== selected.type && (
               <div className="detail-section">
                 <div className="section-label">CHECKED TYPE</div>
                 <div className="type-value checked">{selected.computedType}</div>

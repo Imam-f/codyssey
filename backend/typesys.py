@@ -81,6 +81,11 @@ class Callable(Type):
     params: tuple  # tuple of (name, Type)
     ret: Type
     effect: str = "unknown"
+    # Built-in methods are synthesized from the receiver instead of being
+    # declared in every project.  The metadata stays internal to the checker;
+    # it is not part of the public serialized type shape.
+    builtin: str | None = None
+    receiver: Type | None = None
 
 
 def make_union(members: Iterable[Type]) -> Type:
@@ -175,6 +180,130 @@ def display(t: Type) -> str:
         params = ", ".join(f"{name}: {display(pt)}" for name, pt in t.params)
         return f"({params}) -> {display(t.ret)}"
     return "?"
+
+
+# --- Implicit built-in members ---------------------------------------------
+
+def _mapping_parts(receiver: Type):
+    """Return ``(key, value)`` for dict-like values, if known.
+
+    Dict literals are represented as ``Record`` so that named keys can be
+    inspected.  They still have the normal dict methods, hence the explicit
+    support here alongside generic ``dict[K, V]`` containers.
+    """
+    if isinstance(receiver, Record):
+        value = receiver.rest if not isinstance(receiver.rest, Never) else Unknown()
+        return Primitive("str"), value
+    if isinstance(receiver, Container) and receiver.shape == "dict":
+        return receiver.key or Unknown(), receiver.element
+    return None
+
+
+def _mapping_value(receiver: Type, key_node=None) -> Type:
+    """Resolve a dict value, using an exact string key for records when able."""
+    if isinstance(receiver, Record):
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            for name, field_type in receiver.fields:
+                if name == key_node.value:
+                    return field_type
+        return receiver.rest if not isinstance(receiver.rest, Never) else Unknown()
+    parts = _mapping_parts(receiver)
+    return parts[1] if parts else Unknown()
+
+
+def _builtin_member(receiver: Type, attr: str) -> Type | None:
+    """Synthesize common Python collection and scalar methods.
+
+    The checker intentionally models dict views as lists because the type
+    layer has no separate view type.  Method parameters are mainly useful to
+    document the inferred member; call result specialization is handled in
+    ``TypeChecker._builtin_call_result`` for methods such as ``dict.get``.
+    """
+    mapping = _mapping_parts(receiver)
+    if mapping:
+        key, value = mapping
+        pair = Container("tuple", make_union((key, value)))
+        if attr == "keys":
+            ret = Container("list", key)
+            return Callable((), ret, builtin="dict.keys", receiver=receiver)
+        if attr == "values":
+            ret = Container("list", value)
+            return Callable((), ret, builtin="dict.values", receiver=receiver)
+        if attr == "items":
+            ret = Container("list", pair)
+            return Callable((), ret, builtin="dict.items", receiver=receiver)
+        if attr == "get":
+            return Callable((("key", key), ("default", Unknown())), join(value, Primitive("None")), builtin="dict.get", receiver=receiver)
+        if attr == "setdefault":
+            return Callable((("key", key), ("default", value)), value, "side_effect", "dict.setdefault", receiver)
+        if attr == "pop":
+            return Callable((("key", key), ("default", Unknown())), value, "side_effect", "dict.pop", receiver)
+        if attr == "popitem":
+            return Callable((), pair, "side_effect", "dict.popitem", receiver)
+        if attr == "copy":
+            return Callable((), receiver, builtin="dict.copy", receiver=receiver)
+        if attr in ("clear", "update"):
+            return Callable((), Primitive("None"), "side_effect", f"dict.{attr}", receiver)
+
+    if isinstance(receiver, Container):
+        shape = receiver.shape
+        element = receiver.element
+        if shape == "list":
+            if attr in ("append", "extend", "insert", "remove"):
+                return Callable((("value", element),), Primitive("None"), "side_effect", f"list.{attr}", receiver)
+            if attr in ("clear", "reverse", "sort"):
+                return Callable((), Primitive("None"), "side_effect", f"list.{attr}", receiver)
+            if attr == "pop":
+                return Callable((), element, "side_effect", "list.pop", receiver)
+            if attr == "copy":
+                return Callable((), receiver, builtin="list.copy", receiver=receiver)
+            if attr in ("count", "index"):
+                return Callable((("value", element),), Primitive("int"), builtin=f"list.{attr}", receiver=receiver)
+        if shape in ("tuple", "sequence") and attr in ("count", "index"):
+            return Callable((("value", element),), Primitive("int"), builtin=f"tuple.{attr}", receiver=receiver)
+        if shape in ("set", "frozenset"):
+            if attr in ("copy", "difference", "intersection", "symmetric_difference", "union"):
+                return Callable((), receiver, builtin=f"set.{attr}", receiver=receiver)
+            if attr in ("isdisjoint", "issubset", "issuperset"):
+                return Callable((), Primitive("bool"), builtin=f"set.{attr}", receiver=receiver)
+            if attr == "pop":
+                return Callable((), element, "side_effect", "set.pop", receiver)
+            if attr in ("add", "discard", "remove", "update", "intersection_update", "difference_update", "symmetric_difference_update", "clear"):
+                return Callable((("value", element),), Primitive("None"), "side_effect", f"set.{attr}", receiver)
+
+    if isinstance(receiver, Primitive) and receiver.name == "str":
+        if attr in {
+            "capitalize", "casefold", "center", "expandtabs", "format", "format_map",
+            "join", "lower", "lstrip", "removeprefix", "removesuffix", "replace",
+            "rstrip", "strip", "swapcase", "title", "translate", "upper", "zfill",
+        }:
+            return Callable((), receiver, builtin=f"str.{attr}", receiver=receiver)
+        if attr in {"count", "find", "index", "rfind", "rindex"}:
+            return Callable((), Primitive("int"), builtin=f"str.{attr}", receiver=receiver)
+        if attr in {
+            "isalnum", "isalpha", "isascii", "isdecimal", "isdigit", "isidentifier",
+            "islower", "isnumeric", "isprintable", "isspace", "istitle", "isupper",
+            "startswith", "endswith",
+        }:
+            return Callable((), Primitive("bool"), builtin=f"str.{attr}", receiver=receiver)
+        if attr == "encode":
+            return Callable((), Primitive("bytes"), builtin="str.encode", receiver=receiver)
+        if attr in ("split", "rsplit", "splitlines"):
+            return Callable((), Container("list", Primitive("str")), builtin=f"str.{attr}", receiver=receiver)
+        if attr in ("partition", "rpartition"):
+            return Callable((), Container("tuple", Primitive("str")), builtin=f"str.{attr}", receiver=receiver)
+
+    if isinstance(receiver, Primitive) and receiver.name == "bytes":
+        if attr in ("decode",):
+            return Callable((), Primitive("str"), builtin="bytes.decode", receiver=receiver)
+        if attr in ("hex",):
+            return Callable((), Primitive("str"), builtin="bytes.hex", receiver=receiver)
+        if attr in ("split", "rsplit", "splitlines"):
+            return Callable((), Container("list", Primitive("bytes")), builtin=f"bytes.{attr}", receiver=receiver)
+        if attr in ("count", "find", "index", "rfind", "rindex"):
+            return Callable((), Primitive("int"), builtin=f"bytes.{attr}", receiver=receiver)
+
+    return None
 
 
 # --- Type expression parsing -------------------------------------------------
@@ -578,12 +707,13 @@ class TypeChecker(ast.NodeVisitor):
             member = self.members.lookup_id(parent, node.attr) if parent else None
             return member if member is not None else Unknown()
         receiver = self.visit(node.value)
+        builtin = _builtin_member(receiver, node.attr)
+        if builtin is not None:
+            return builtin
         if isinstance(receiver, Record):
             for name, field_type in receiver.fields:
                 if name == node.attr:
                     return field_type
-        if isinstance(receiver, Container) and receiver.shape == "dict" and node.attr == "items":
-            return Callable((), Container("list", Container("tuple", Unknown())))
         if isinstance(receiver, Named):
             member = self.members.lookup(receiver, node.attr)
             if member is not None:
@@ -667,18 +797,58 @@ class TypeChecker(ast.NodeVisitor):
         if isinstance(callee, Never):
             self.error(node, "cannot call a value of type never", "never-callee")
             return Never()
+        arg_types = []
         for arg in node.args:
             arg_type = self.visit(arg)
+            arg_types.append(arg_type)
             if isinstance(arg_type, Never):
                 self.error(
                     arg,
                     f"argument of type never makes this call unreachable",
                     "never-arg",
                 )
+        keyword_types = {}
+        for keyword in node.keywords:
+            arg_type = self.visit(keyword.value)
+            keyword_types[keyword.arg] = arg_type
+            if isinstance(arg_type, Never):
+                self.error(
+                    keyword.value,
+                    "argument of type never makes this call unreachable",
+                    "never-arg",
+                )
         if isinstance(callee, Callable):
             if any(isinstance(pt, Never) for _, pt in callee.params):
                 self.error(node, "cannot call this function: it accepts a never parameter", "never-param")
+            if callee.builtin:
+                return self._builtin_call_result(callee, node, arg_types, keyword_types)
         return self.call_result(callee)
+
+    def _builtin_call_result(self, callee, node, arg_types, keyword_types):
+        """Refine implicit method results using the call's optional arguments."""
+        builtin = callee.builtin
+        receiver = callee.receiver
+        if not receiver:
+            return callee.ret
+        kind, _, method = builtin.partition(".")
+        if kind == "dict":
+            if method in ("get", "setdefault", "pop"):
+                key_node = node.args[0] if node.args else None
+                result = _mapping_value(receiver, key_node)
+                default = None
+                if len(arg_types) > 1:
+                    default = arg_types[1]
+                else:
+                    default = keyword_types.get("default")
+                if method == "get" and default is None:
+                    default = Primitive("None")
+                if method == "setdefault" and default is None:
+                    default = Primitive("None")
+                if default is not None:
+                    result = join(result, default)
+                return result
+            return callee.ret
+        return callee.ret
 
     # -- statements --
     def visit_Expr(self, node):
@@ -803,11 +973,11 @@ class TypeChecker(ast.NodeVisitor):
 
         # A method's receiver (``self``/``cls``) is typed as the enclosing class,
         # never Unknown. staticmethods have no implicit receiver.
-        class_name = None
-        for scope in reversed(self.scopes):
-            if scope["kind"] == "class":
-                class_name = scope["name"]
-                break
+        # Only functions directly contained by a class are methods.  Looking
+        # through every enclosing scope would incorrectly type a nested
+        # function such as ``def outer(): def inner(self): ...`` as a method.
+        class_scope = self.scopes[-1] if self.scopes[-1]["kind"] == "class" else None
+        class_name = class_scope["name"] if class_scope else None
         class_id = self.class_id_stack[-1] if self.class_id_stack else None
         decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
         is_static = "staticmethod" in decorators
@@ -902,7 +1072,9 @@ class TypeChecker(ast.NodeVisitor):
 
     def visit_ClassDef(self, node):
         self.push("class", node.name)
-        self.class_id_stack.append(self.members.name_to_id.get(node.name))
+        self.class_id_stack.append(
+            self.members.class_id_for(self.path, node.name, node.lineno)
+        )
         for statement in node.body:
             self.visit(statement)
         self.class_id_stack.pop()
@@ -1008,6 +1180,7 @@ class MemberTable:
         self.local = {}      # class symbol id -> {member: Type}
         self.bases = {}      # class symbol id -> [base ids]
         self.name_to_id = {}  # class name -> first class id
+        self.class_locations = {}  # (path, name, line) -> class symbol id
 
         for file in files:
             symbols_by_scope = {}
@@ -1021,6 +1194,7 @@ class MemberTable:
                 cls = classes_by_id.get(cid, {})
                 self.bases[cid] = [b for b in cls.get("baseIds", []) if b]
                 self.name_to_id.setdefault(symbol["name"], cid)
+                self.class_locations[(file["path"], symbol["name"], symbol["line"])] = cid
                 members = {}
                 body = symbol.get("bodyScopeId")
                 for s in symbols_by_scope.get(body, []):
@@ -1055,6 +1229,15 @@ class MemberTable:
                     }
                     members[attr] = self._assignment_type(assignment, param_types)
                 self.local[cid] = members
+
+    def class_id_for(self, path, name, line):
+        """Resolve a class by its source location, not just its name.
+
+        Class names are allowed to repeat across modules (and even within a
+        module), so the global name fallback is only a compatibility fallback
+        for callers that do not have a source location.
+        """
+        return self.class_locations.get((path, name, line)) or self.name_to_id.get(name)
 
     @staticmethod
     def _assignment_type(assignment, param_types):
@@ -1206,6 +1389,20 @@ def _attach_facts(file, facts):
         symbol = matches[0]
         symbol["computedType"] = display(fact.type)
         symbol["typeStruct"] = serialize(fact.type)
+        # ``self`` and ``cls`` are implicit parameters: their source has no
+        # annotation, but the checker can still infer the enclosing class.
+        # Promote that inference to the indexed symbol so the inspector's
+        # primary Type field is useful as well as the checked-type detail.
+        if (
+            symbol.get("kind") == "parameter"
+            and symbol.get("name") in ("self", "cls")
+            and symbol.get("typeSource") == "unknown"
+            and isinstance(fact.type, Named)
+        ):
+            symbol["type"] = display(fact.type)
+            symbol["typeSource"] = "inferred"
+            if fact.type.symbol_id:
+                symbol["typeTargets"] = [fact.type.symbol_id]
         symbol["mutable"] = fact.mutable
         if fact.effect != "unknown":
             symbol["effect"] = fact.effect

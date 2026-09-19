@@ -366,8 +366,11 @@ def analyze(root):
                 diagnostics.append({'path': relative, 'line': 1, 'severity': 'error', 'message': str(exc)})
         if len(files) >= MAX_FILES: break
     link_repository(files)
-    link_definitions(files)
     track_classes(files)
+    # Class tracking registers instance fields as property symbols. Definition
+    # linking runs afterwards so ``self.field`` can target those symbols,
+    # including fields inherited from a parent class.
+    link_definitions(files)
     call_graph = link_calls(files)
 
     declarations_by_path = {}

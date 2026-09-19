@@ -29,6 +29,32 @@ def _member(cls, name, kind, path, line, column, symbol_id=None, defined_in='cla
     }
 
 
+def _field_symbol(cls, name, write, scope_id, field_type='unknown', type_source='unknown'):
+    """Create the indexed symbol used by instance-field references.
+
+    Instance attributes do not have a standalone AST binding, but they are
+    still members with a stable declaration location. Giving them a symbol id
+    lets definition resolution and the source inspector treat them like class
+    properties, including when the member is inherited.
+    """
+    symbol_id = f"{cls['id']}:property:{name}"
+    return {
+        'id': symbol_id,
+        'name': name,
+        'kind': 'property',
+        'path': write['path'],
+        'scopeId': scope_id,
+        'scopeName': cls['name'],
+        'type': field_type,
+        'typeSource': type_source,
+        'line': write['line'],
+        'column': write['column'],
+        'endLine': write.get('endLine', write['line']),
+        'references': 0,
+        'typeTargets': [],
+    }
+
+
 def track_classes(files):
     """Attach direct, overridden, inherited, and dynamic members to classes."""
     resolver = CallResolver(files)
@@ -92,6 +118,8 @@ def track_classes(files):
                     'path': path,
                     'line': assignment['line'],
                     'column': assignment['column'] + len(receiver) + 1,
+                    'value': assignment.get('value'),
+                    'annotation': assignment.get('annotation'),
                 })
 
         for name, writes in property_writes.items():
@@ -101,9 +129,28 @@ def track_classes(files):
                 existing['initializers'].extend(writes)
                 continue
             first = stable or writes[0]
+            field_symbol_id = f"{cls['id']}:property:{name}"
+            field_type = first.get('annotation') or 'unknown'
+            field_type_source = 'annotation' if first.get('annotation') else 'unknown'
+            if not first.get('annotation'):
+                method_scope = symbols[first['methodId']].get('bodyScopeId')
+                parameters = {
+                    symbol['name']: symbol
+                    for symbol in symbols_by_scope[method_scope]
+                    if symbol['kind'] == 'parameter'
+                }
+                value_symbol = parameters.get(first.get('value'))
+                if value_symbol:
+                    field_type = value_symbol.get('type', 'unknown')
+                    field_type_source = value_symbol.get('typeSource', 'unknown')
+            file = resolver.files[first['path']]
+            if not any(symbol['id'] == field_symbol_id for symbol in file['symbols']):
+                file['symbols'].append(
+                    _field_symbol(cls, name, first, class_scope, field_type, field_type_source)
+                )
             member = _member(
                 cls, name, 'property', first['path'], first['line'], first['column'],
-                defined_in=first['method'], initializers=writes
+                symbol_id=field_symbol_id, defined_in=first['method'], initializers=writes
             )
             member['dynamic'] = stable is None
             members[name] = member
