@@ -52,6 +52,15 @@ export default function SourceView({
   load,
   busy,
 }) {
+  const closeTab = (tab) => {
+    const next = tabs.filter((t) => t !== tab);
+    setTabs(next);
+    if (path === tab) {
+      setPath(next.at(-1) || "");
+      setSelectedId(null);
+    }
+  };
+
   return (
     <>
       <div className="file-tabs">
@@ -59,6 +68,15 @@ export default function SourceView({
           <div
             key={tab}
             className={`file-tab ${tab === path ? "active" : ""}`}
+            onAuxClick={(event) => {
+              if (event.button === 1) {
+                event.preventDefault();
+                closeTab(tab);
+              }
+            }}
+            onMouseDown={(event) => {
+              if (event.button === 1) event.preventDefault();
+            }}
           >
             <button onClick={() => navigate({ path: tab })}>
               <FileCode2 size={13} />
@@ -66,14 +84,7 @@ export default function SourceView({
             </button>
             <button
               aria-label={`Close ${basename(tab)}`}
-              onClick={() => {
-                const next = tabs.filter((t) => t !== tab);
-                setTabs(next);
-                if (path === tab) {
-                  setPath(next.at(-1) || "");
-                  setSelectedId(null);
-                }
-              }}
+              onClick={() => closeTab(tab)}
             >
               <X size={12} />
             </button>

@@ -126,9 +126,9 @@ export default function ClassTracker({ classes, onNavigate }) {
                   <small>{basename(cls.path)}</small>
                 </span>
                 {memberTracker.dynamicProperties.length > 0 && (
-                  <i title="Dynamic properties">
+                  <span className="dynamic-count" title="Dynamic properties">
                     {memberTracker.dynamicProperties.length}
-                  </i>
+                  </span>
                 )}
                 <ChevronRight size={12} />
               </button>

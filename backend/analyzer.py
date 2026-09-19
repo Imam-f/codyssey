@@ -388,6 +388,9 @@ def link_repository(files):
             if aliases:
                 alias = aliases[-1]
                 target = alias['resolved'] + ('.' + tail if tail else '')
+                alias_key = (scope['id'], head, alias['line'])
+                if alias_key in seen: return None
+                seen.add(alias_key)
                 hit = exports.get(qualified(file, target))
                 if hit: return hit
                 return resolve(file, target, scope['id'], alias['line'] - (1 if alias['kind'] == 'assignment' else 0), seen)

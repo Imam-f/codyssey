@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
+  Box,
   FileCode2,
   GitBranch,
   ListTree,
@@ -11,6 +12,7 @@ import CallGraph from "./CallGraph";
 import { api, clamp } from "./util";
 import Resizer from "./components/Resizer";
 import InheritanceGraph from "./components/InheritanceGraph";
+import ClassTracker from "./components/ClassTracker";
 import Toolbar from "./components/Toolbar";
 import Sidebar from "./components/Sidebar";
 import SourceView from "./components/SourceView";
@@ -311,6 +313,13 @@ function App() {
                 Inheritance<span className="count">{classes.length}</span>
               </button>
               <button
+                className={view === "classes" ? "active" : ""}
+                onClick={() => setView("classes")}
+              >
+                <Box size={14} />
+                Class tracker
+              </button>
+              <button
                 className={view === "calls" ? "active" : ""}
                 onClick={() => {
                   setCallFocus(callContext || callFocus);
@@ -371,6 +380,8 @@ function App() {
               load={load}
               busy={busy}
             />
+          ) : view === "classes" ? (
+            <ClassTracker classes={classes} onNavigate={navigate} />
           ) : view === "calls" ? (
             <CallGraph
               graph={repo?.callGraph}

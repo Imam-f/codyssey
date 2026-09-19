@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   Search,
   Box,
@@ -15,6 +15,8 @@ export default function InheritanceGraph({ classes, onNavigate }) {
   const [query, setQuery] = useState(""),
     [zoom, setZoom] = useState(1),
     [focus, setFocus] = useState(null);
+  const canvasRef = useRef(null);
+  const drag = useRef(null);
   const graph = useMemo(() => {
     const nodes = new Map(
       classes.map((c) => [c.id, { ...c, external: false }]),
@@ -106,6 +108,36 @@ export default function InheritanceGraph({ classes, onNavigate }) {
       height: Math.max(450, rows.size * 170 + 80),
     };
   }, [classes, query, focus]);
+
+  function onPointerDown(e) {
+    if (e.target.closest("button, a, input, label")) return;
+    const el = canvasRef.current;
+    drag.current = {
+      x: e.clientX,
+      y: e.clientY,
+      sl: el.scrollLeft,
+      st: el.scrollTop,
+      id: e.pointerId,
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  }
+  function onPointerMove(e) {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const el = canvasRef.current;
+    el.scrollLeft = d.sl - (e.clientX - d.x);
+    el.scrollTop = d.st - (e.clientY - d.y);
+  }
+  function onPointerUp(e) {
+    if (drag.current?.id !== e.pointerId) return;
+    drag.current = null;
+    try {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    } catch {}
+  }
+
   return (
     <div className="graph-view">
       <div className="graph-toolbar">
@@ -129,7 +161,14 @@ export default function InheritanceGraph({ classes, onNavigate }) {
           />
         </label>
       </div>
-      <div className="graph-canvas">
+      <div
+        className="graph-canvas"
+        ref={canvasRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
         <div
           style={{
             width: graph.width * zoom,
