@@ -368,6 +368,10 @@
   inset: 0;
   pointer-events: none;
 }
+.graph-inner .graph-edge-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
 .graph-node {
   position: absolute;
   width: 200px;
@@ -382,9 +386,18 @@
   border: 1px dashed #59616c;
   background: #1b1e23;
 }
-.graph-node.focused {
+.graph-node.pinned {
   border-color: #a5c7b5;
   box-shadow: 0 0 0 2px #638c6e44;
+}
+.graph-node-pin {
+  color: #7d8a99;
+}
+.graph-node-pin:hover {
+  color: #cfd9e2;
+}
+.graph-node.pinned .graph-node-pin {
+  color: #a5c7b5;
 }
 .graph-node-title {
   display: flex;
