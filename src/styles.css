@@ -576,7 +576,7 @@ i {
 }
 .code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 22px;
   padding: 15px 0 45px;
   min-width: max-content;
