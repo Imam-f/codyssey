@@ -11,6 +11,7 @@ import {
 import { initHighlighter } from "./highlight";
 import CallGraph from "./CallGraph";
 import { api } from "./util";
+import { declarationTarget } from "./declaration";
 import Resizer from "./components/Resizer";
 import InheritanceGraph from "./components/InheritanceGraph";
 import ClassTracker from "./components/ClassTracker";
@@ -331,6 +332,17 @@ function App() {
       );
     else setNotice("No definition found in the indexed repository");
   }
+  async function popDeclaration(symbol) {
+    const declaration = symbols.find((item) => item.id === symbol?.id) || symbol;
+    const owner = repo?.files.find((item) => item.path === declaration?.path);
+    const target = declarationTarget(owner, declaration);
+    if (!target) return;
+    try {
+      await api.openDeclaration(target);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
   async function exportReport() {
     try {
       if (await api.export(JSON.stringify(repo, null, 2)))
@@ -523,13 +535,14 @@ function App() {
               busy={busy}
               onScroll={handleSourceScroll}
               clearTabState={clearTabState}
+              onPopDeclaration={popDeclaration}
             />
           </div>
           <div
             className="view-pane"
             style={{ display: view === "classes" ? undefined : "none" }}
           >
-            <ClassTracker classes={classes} onNavigate={navigate} />
+            <ClassTracker classes={classes} onNavigate={navigate} onPopDeclaration={popDeclaration} />
           </div>
           <div
             className="view-pane"
@@ -540,6 +553,7 @@ function App() {
               focusId={callFocus}
               onFocus={focusCall}
               onNavigate={navigate}
+              onPopDeclaration={popDeclaration}
             />
           </div>
           <div
@@ -578,6 +592,7 @@ function App() {
               callGraph={repo?.callGraph}
               focusCall={focusCall}
               path={path}
+              onPopDeclaration={popDeclaration}
             />
           </>
         )}

@@ -32,6 +32,9 @@ export const api = window.codyssey || {
     );
   },
   refresh: () => api.sample(),
+  openDeclaration: async () => {
+    throw new Error("Declaration pop windows are available in the Electron desktop app.");
+  },
   recent: async () => [],
   openRecent: async () => api.open(),
   removeRecent: async () => [],

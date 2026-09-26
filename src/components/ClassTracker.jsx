@@ -5,6 +5,7 @@ import {
   Braces,
   ChevronRight,
   Search,
+  Maximize2,
   Variable,
 } from "lucide-react";
 import { basename } from "../util";
@@ -62,7 +63,7 @@ function MemberGroup({ title, tone, members, onNavigate }) {
   );
 }
 
-export default function ClassTracker({ classes, onNavigate }) {
+export default function ClassTracker({ classes, onNavigate, onPopDeclaration }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const normalized = query.trim().toLowerCase();
@@ -147,6 +148,9 @@ export default function ClassTracker({ classes, onNavigate }) {
                 </button>
                 <p>{selected.path}:{selected.line}</p>
               </div>
+              <button title={`Pop ${selected.name}`} aria-label={`Pop ${selected.name}`} onClick={() => onPopDeclaration(selected)}>
+                <Maximize2 size={15} />
+              </button>
               <div className="class-detail-bases">
                 {selected.bases.length ? (
                   selected.bases.map((base) => <code key={base}>{base}</code>)

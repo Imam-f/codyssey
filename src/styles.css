@@ -582,11 +582,27 @@ i {
   min-width: max-content;
 }
 .code-line {
+  position: relative;
   display: flex;
   min-height: 22px;
   border-left: 2px solid transparent;
   padding-right: 30px;
 }
+.declaration-pop {
+  position: absolute;
+  z-index: 1;
+  left: 58px;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: #8196a9;
+  background: #1b2225;
+  opacity: .7;
+}
+.declaration-pop:hover, .declaration-pop:focus-visible { color: #d9e7f2; opacity: 1; }
 .current-line {
   background: #1b2225;
   border-left-color: #87aa99;

@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 let window, currentRoot, activeProcess;
+let indexedPaths = new Set();
+const popouts = new Map();
 let recentRepositories = [];
 const resources = () =>
   app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
@@ -95,6 +97,7 @@ async function loadIndex(root) {
 async function reindex(root) {
   const result = await analyze(root);
   await writeCache(root, result, await fingerprint(root));
+  indexedPaths = new Set(result.files.map((file) => file.path));
   return result;
 }
 
@@ -137,7 +140,86 @@ async function openRepository(root, remember = true) {
     ].slice(0, 10));
   }
   currentRoot = directory;
+  indexedPaths = new Set(result.files.map((file) => file.path));
   return result;
+}
+function inspectDeclaration(file, target) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("uv", ["run", "--no-project", "--script",
+      path.join(resources(), "backend", "declaration.py"), file, JSON.stringify(target)],
+    { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (data) => { output = (output + data).slice(0, 4_000_000); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      try {
+        if (code !== 0) throw new Error("Could not inspect declaration.");
+        resolve(JSON.parse(output));
+      } catch (error) { reject(error); }
+    });
+  });
+}
+
+function openDeclaration(target) {
+  if (!currentRoot || !indexedPaths.has(target?.path) ||
+      !Array.isArray(target.chain) || !target.chain.length ||
+      !target.chain.every((part) => ["class", "function"].includes(part.kind) &&
+        typeof part.name === "string" && part.name.length < 200) ||
+      !Number.isInteger(target.line) || target.line < 1)
+    throw new Error("Invalid declaration target.");
+  const file = path.resolve(currentRoot, target.path);
+  if (!file.startsWith(currentRoot + path.sep))
+    throw new Error("Invalid declaration path.");
+  const popup = new BrowserWindow({
+    width: 360, height: 180, minWidth: 360, minHeight: 180,
+    frame: false, alwaysOnTop: true, autoHideMenuBar: true,
+    backgroundColor: "#101215", title: target.chain.at(-1).name,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true, nodeIntegration: false, sandbox: true,
+    },
+  });
+  const state = { popup, target: { ...target }, file, lastStamp: null,
+    current: { status: "loading" }, lastFound: null, busy: false, timer: null };
+  const popupId = popup.webContents.id;
+  popouts.set(popupId, state);
+  popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  popup.webContents.on("will-navigate", (event) => event.preventDefault());
+  async function update() {
+    if (state.busy || popup.isDestroyed()) return;
+    state.busy = true;
+    try {
+      const stat = await fs.stat(file);
+      const stamp = `${stat.mtimeMs}:${stat.size}`;
+      if (stamp === state.lastStamp) return;
+      state.lastStamp = stamp;
+      const result = await inspectDeclaration(file, state.target);
+      if (result.status === "found") {
+        state.target.line = result.line;
+        state.lastFound = result;
+      }
+      state.current = result.status === "invalid" && state.lastFound
+        ? { ...state.lastFound, status: "stale", message: result.message }
+        : result;
+    } catch (error) {
+      state.lastStamp = null;
+      state.current = { status: "error", message: error.message };
+    } finally {
+      state.busy = false;
+      if (!popup.isDestroyed()) popup.webContents.send("declaration:update", state.current);
+    }
+  }
+  popup.on("closed", () => {
+    clearInterval(state.timer);
+    popouts.delete(popupId);
+  });
+  state.timer = setInterval(update, 850);
+  if (process.env.CODYSSEY_DEV_URL)
+    popup.loadURL(`${process.env.CODYSSEY_DEV_URL}?popout=1`);
+  else popup.loadFile(path.join(__dirname, "..", "dist", "index.html"), { query: { popout: "1" } });
+  update();
+  return true;
 }
 function analyze(root) {
   return new Promise((resolve, reject) => {
@@ -261,6 +343,39 @@ app.whenReady().then(async () => {
   handle("repo:close", () => {
     if (activeProcess) throw new Error("Wait for indexing to finish before closing the repository.");
     currentRoot = null;
+    indexedPaths = new Set();
+    for (const state of popouts.values()) state.popup.close();
+  });
+  handle("declaration:open", openDeclaration);
+  ipcMain.handle("declaration:state", (event) => {
+    const state = popouts.get(event.sender.id);
+    if (!state || event.senderFrame !== event.sender.mainFrame)
+      throw new Error("Unauthorized frame");
+    return { target: state.target, current: state.current };
+  });
+  ipcMain.handle("declaration:close", (event) => {
+    const state = popouts.get(event.sender.id);
+    if (!state || event.senderFrame !== event.sender.mainFrame)
+      throw new Error("Unauthorized frame");
+    state.popup.close();
+  });
+  ipcMain.handle("declaration:fit", (event, size) => {
+    const state = popouts.get(event.sender.id);
+    if (!state || event.senderFrame !== event.sender.mainFrame)
+      throw new Error("Unauthorized frame");
+    if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height))
+      throw new Error("Invalid declaration size.");
+    const popup = state.popup;
+    const workArea = screen.getDisplayMatching(popup.getBounds()).workArea;
+    const width = Math.min(Math.max(360, Math.ceil(size.width)), 680, workArea.width);
+    const height = Math.min(Math.max(180, Math.ceil(size.height)), 520, workArea.height);
+    const bounds = popup.getBounds();
+    if (bounds.width === width && bounds.height === height) return;
+    popup.setBounds({
+      x: Math.min(Math.max(bounds.x, workArea.x), workArea.x + workArea.width - width),
+      y: Math.min(Math.max(bounds.y, workArea.y), workArea.y + workArea.height - height),
+      width, height,
+    });
   });
   handle("repo:open-in-vscode", async () => {
     if (!currentRoot) throw new Error("Open a repository first.");

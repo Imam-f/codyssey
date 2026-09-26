@@ -1,0 +1,28 @@
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+.declaration-popup { position: relative; display: flex; flex-direction: column; height: 100%; color: #d9dee5; background: #101215; font-family: Inter, system-ui, sans-serif; }
+.popup-top-strip { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 8px; -webkit-app-region: drag; user-select: none; }
+.popup-window-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; -webkit-app-region: no-drag; }
+.popup-window-button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; color: #aebbc8; background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
+.popup-window-button:hover, .popup-window-button:focus-visible { color: #e5edf4; background: #303842; }
+.popup-info-wrap { position: relative; }
+.popup-info-popover { position: absolute; top: 32px; right: 0; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: 280px; max-width: calc(100vw - 24px); padding: 13px 14px; color: #d9e2ea; background: #20262d; border: 1px solid #37414c; border-radius: 6px; box-shadow: 0 10px 26px #0008; opacity: 0; visibility: hidden; pointer-events: none; -webkit-app-region: no-drag; }
+.popup-info-wrap:hover .popup-info-popover, .popup-info-wrap:focus-within .popup-info-popover { opacity: 1; visibility: visible; pointer-events: auto; }
+.popup-info-kind { color: #91b8db; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.popup-info-popover strong { overflow-wrap: anywhere; font: 600 12px Consolas, 'Cascadia Code', monospace; }
+.popup-info-path { overflow-wrap: anywhere; color: #a1afbc; font: 11px/1.45 Consolas, 'Cascadia Code', monospace; }
+.popup-info-status { color: #80c99a; font-size: 10px; }
+.popup-info-status.stale { color: #d6b57b; }
+.popup-stale-message { padding: 0 14px 10px; color: #d6b57b; font: 11px system-ui, sans-serif; }
+.popup-fold-actions { display: flex; gap: 2px; -webkit-app-region: no-drag; }
+.popup-fold-actions button { display: grid; place-items: center; width: 22px; height: 20px; padding: 0; color: #92a2b1; background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+.popup-fold-actions button:hover { color: #e1e8ef; background: #303842; }
+.popup-code { flex: 1; overflow: auto; padding: 46px 0 24px; font: 12px/1.55 Consolas, 'Cascadia Code', monospace; }
+.popup-code-body { width: max-content; }
+.popup-code-line { display: flex; min-width: max-content; padding-right: 24px; }
+.popup-fold-toggle { position: sticky; left: 0; z-index: 2; display: grid; place-items: center; width: 18px; flex: none; padding: 0; color: #748597; background: #101215; border: 0; cursor: pointer; }
+.popup-fold-toggle:disabled { cursor: default; }
+.popup-fold-toggle:not(:disabled):hover { color: #e1e8ef; }
+.popup-line-number { position: sticky; left: 18px; z-index: 1; box-sizing: border-box; width: 48px; flex: none; padding-right: 10px; text-align: right; color: #66727e; background: #101215; user-select: none; }
+.popup-code-line code { white-space: pre; color: #d9dee5; font: inherit; }
+.popup-fold-summary { margin-left: 12px; color: #748597; font: inherit; user-select: none; }
+.popup-message { padding: 52px 22px 22px; color: #aeb9c6; font-size: 12px; }

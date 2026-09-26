@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Crosshair,
   CircleAlert,
+  Maximize2,
 } from "lucide-react";
 import { Icon, basename } from "../util";
 import { CallRelations } from "../CallGraph";
@@ -29,6 +30,7 @@ const Inspector = forwardRef(function Inspector(
     callGraph,
     focusCall,
     path,
+    onPopDeclaration,
   },
   ref,
 ) {
@@ -95,6 +97,11 @@ const Inspector = forwardRef(function Inspector(
             </div>
             <div className="detail-section">
               <div className="section-label">DECLARATION</div>
+              {["class", "function"].includes(selected.kind) && (
+                <button className="detail-link" title={`Pop ${selected.name}`} onClick={() => onPopDeclaration(selected)}>
+                  <Maximize2 size={13} /> Pop declaration
+                </button>
+              )}
               <button
                 className="declaration-link"
                 onClick={() => navigate(selected)}

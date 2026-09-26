@@ -103,7 +103,7 @@ export function CallRelations({ graph, focusId, onNavigate, onFocus }) {
   );
 }
 
-export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
+export default function CallGraph({ graph, focusId, onFocus, onNavigate, onPopDeclaration }) {
   const [query, setQuery] = useState("");
   const [connectionQuery, setConnectionQuery] = useState("");
   const [showUnresolved, setShowUnresolved] = useState(true);
@@ -359,6 +359,15 @@ export default function CallGraph({ graph, focusId, onFocus, onNavigate }) {
               </React.Fragment>
             ))}
           </button>
+          {!node.external && node.kind === "function" && (
+            <button
+              title={`Pop ${node.label}`}
+              aria-label={`Pop ${node.label}`}
+              onClick={() => onPopDeclaration(node)}
+            >
+              <Maximize2 size={14} />
+            </button>
+          )}
           {!node.external && (
             <button
               title={`Open definition of ${node.label}`}
