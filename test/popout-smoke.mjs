@@ -31,6 +31,12 @@ try {
   await popup.locator(".popup-info-popover").waitFor({ state: "hidden" });
   assert.match(await popup.locator(".popup-code").textContent(), /def update_email/);
   await popup.locator(".popup-code .syntax-keyword").first().waitFor();
+  assert.equal(await popup.locator(".popup-fold-actions button").count(), 1);
+  assert.equal(await popup.locator(".popup-code-line").first().evaluate((line) => {
+    const number = line.querySelector(".popup-line-number").getBoundingClientRect();
+    const arrow = line.querySelector(".popup-fold-toggle").getBoundingClientRect();
+    return Math.round(arrow.left - number.right);
+  }), 0);
   const fullLineCount = await popup.locator(".popup-code-line").count();
   await popup.getByRole("button", { name: "Collapse block" }).first().click();
   assert.ok(await popup.locator(".popup-code-line").count() < fullLineCount);
@@ -38,10 +44,14 @@ try {
   assert.equal(await popup.locator(".popup-code-line").count(), fullLineCount);
   await popup.getByRole("button", { name: "Fold all blocks", exact: true }).click();
   assert.ok(await popup.locator(".popup-code-line").count() < fullLineCount);
+  assert.equal(await popup.locator(".popup-fold-actions button").count(), 1);
   await popup.getByRole("button", { name: "Unfold all blocks", exact: true }).click();
   assert.equal(await popup.locator(".popup-code-line").count(), fullLineCount);
   assert.equal(await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows().some((item) => !item.isDestroyed() && item.isAlwaysOnTop())), true);
+  await popup.getByRole("button", { name: "Close declaration window" }).hover();
+  assert.equal(await popup.getByRole("button", { name: "Close declaration window" }).evaluate((button) =>
+    getComputedStyle(button).backgroundColor), "rgb(184, 53, 53)");
   const closed = popup.waitForEvent("close");
   await popup.getByRole("button", { name: "Close declaration window" }).click();
   await closed;

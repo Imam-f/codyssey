@@ -44,6 +44,8 @@ export default function DeclarationPopup() {
     }
     return hidden;
   }, [foldRanges, collapsed]);
+  const allFolded = foldRanges.length > 0 && foldRanges.every((range) => collapsed.has(range.id));
+  const numberWidth = Math.max(32, String(current?.endLine || 1).length * 8 + 6);
   useEffect(() => {
     if (!source) return;
     let active = true;
@@ -88,11 +90,12 @@ export default function DeclarationPopup() {
       <div className="popup-top-strip">
         {source && foldRanges.length > 0 && (
           <div className="popup-fold-actions">
-            <button title="Fold all blocks" aria-label="Fold all blocks" onClick={() => setCollapsed(new Set(foldRanges.map((range) => range.id)))}>
-              <ChevronsDownUp size={13} />
-            </button>
-            <button title="Unfold all blocks" aria-label="Unfold all blocks" onClick={() => setCollapsed(new Set())}>
-              <ChevronsUpDown size={13} />
+            <button
+              title={allFolded ? "Unfold all blocks" : "Fold all blocks"}
+              aria-label={allFolded ? "Unfold all blocks" : "Fold all blocks"}
+              onClick={() => setCollapsed(allFolded ? new Set() : new Set(foldRanges.map((range) => range.id)))}
+            >
+              {allFolded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
             </button>
           </div>
         )}
@@ -109,13 +112,13 @@ export default function DeclarationPopup() {
               {current?.status === "stale" && <span className="popup-info-status stale">Waiting for valid Python</span>}
             </div>
           </div>
-          <button className="popup-window-button" aria-label="Close declaration window" title="Close" onClick={() => window.codyssey.closeDeclaration()}>
+          <button className="popup-window-button popup-close-button" aria-label="Close declaration window" title="Close" onClick={() => window.codyssey.closeDeclaration()}>
             <X size={15} />
           </button>
         </div>
       </div>
       {["found", "stale"].includes(current?.status) ? (
-        <div className="popup-code" role="region" aria-label="Declaration source">
+        <div className="popup-code" role="region" aria-label="Declaration source" style={{ "--popup-number-width": `${numberWidth}px` }}>
           {current?.status === "stale" && <div className="popup-stale-message">{current.message}</div>}
           <div className="popup-code-body" ref={codeBodyRef}>
           {lines.map((line, index) => {
@@ -123,6 +126,7 @@ export default function DeclarationPopup() {
             const fold = foldByStart.get(index);
             return (
               <div className="popup-code-line" key={index}>
+                <span className="popup-line-number">{current.line + index}</span>
                 <button
                   className="popup-fold-toggle"
                   aria-label={fold ? (collapsed.has(fold.id) ? "Expand folded block" : "Collapse block") : undefined}
@@ -132,7 +136,6 @@ export default function DeclarationPopup() {
                 >
                   {fold && (collapsed.has(fold.id) ? <ChevronRight size={12} /> : <ChevronDown size={12} />)}
                 </button>
-                <span className="popup-line-number">{current.line + index}</span>
                 <code>
                   {(tokens[index] || [{ text: line, kind: "plain" }]).map((token, part) => (
                     <span key={part} className={`syntax-${token.kind}`}>{token.text}</span>
