@@ -8,7 +8,12 @@ const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.CODYSSEY_DEV_URL;
 const profile = await mkdtemp(path.join(tmpdir(), "codyssey-popout-profile-"));
-const app = await electron.launch({ args: [".", `--user-data-dir=${profile}`], env });
+const app = await electron.launch({
+  ...(process.env.CODYSSEY_EXECUTABLE
+    ? { executablePath: process.env.CODYSSEY_EXECUTABLE, args: [`--user-data-dir=${profile}`] }
+    : { args: [".", `--user-data-dir=${profile}`] }),
+  env,
+});
 try {
   const page = await app.firstWindow();
   await page.getByRole("button", { name: /Explore the sample/ }).click();

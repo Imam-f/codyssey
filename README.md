@@ -1,14 +1,14 @@
 # Codyssey
 
-**v0.3.0** · [MIT License](LICENSE)
+**v0.4.0** · [MIT License](LICENSE)
 
 > A developer tool where you anger the gods and commit atrocities against humanity
 
-A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer with a code minimap, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph. Reopening a repository reuses a fingerprint-validated analysis cache for near-instant startup.
+A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer with a code minimap and folding, floating declaration windows, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph. Reopening a repository reuses a fingerprint-validated analysis cache for near-instant startup.
 
 ## Download
 
-[Download Codyssey v0.3.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.3.0/Codyssey-0.3.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.3.0)
+[Download Codyssey v0.4.0 for Windows x64](https://github.com/Imam-f/codyssey/releases/download/v0.4.0/Codyssey-0.4.0-windows-x64.exe) · [Release notes](https://github.com/Imam-f/codyssey/releases/tag/v0.4.0)
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure it is on PATH, then launch the portable `.exe`. No app installation or Node.js setup is needed; `uv` selects or installs Python 3.12+ for analysis.
 
@@ -62,6 +62,7 @@ npm run build     # Build the renderer and bundled browser example
 npm start         # Run the production Electron app
 npm test          # Python semantic analysis tests, through uv
 npm run test:ui   # Integration tests against the production Electron app
+npm run test:popout  # Pop-window, live-update, highlighting, folding, and sizing tests
 npm run test:definitions  # Cross-file definition navigation tests
 npm run test:welcome      # Welcome, persistent recents, and VS Code integration tests
 npm run pack      # Unpacked desktop application under release/
