@@ -6,13 +6,45 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 let window, currentRoot, activeProcess;
 let indexedPaths = new Set();
+let indexedFiles = new Map();
+let currentStubOptions = { paths: [], useVenv: false };
 const popouts = new Map();
+let canvasWatch = null;
 let recentRepositories = [];
 const resources = () =>
   app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
 const recentFile = () => path.join(app.getPath("userData"), "recent-repositories.json");
 const rootKey = (root) => process.platform === "win32" ? root.toLowerCase() : root;
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 3;
+const stubSettingsFile = () => path.join(app.getPath("userData"), "stub-settings.json");
+function validStubOptions(value) {
+  if (!value || typeof value.useVenv !== "boolean" || !Array.isArray(value.paths) || value.paths.length > 20 ||
+      !value.paths.every((entry) => typeof entry === "string" && path.isAbsolute(entry) && entry.length < 4000))
+    throw new Error("Invalid stub settings.");
+  return { useVenv: value.useVenv, paths: [...new Set(value.paths)] };
+}
+async function readStubSettings() {
+  try { return JSON.parse(await fs.readFile(stubSettingsFile(), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return {}; throw error; }
+}
+function registerIndex(result) {
+  indexedPaths = new Set(result.files.map((file) => file.path));
+  indexedFiles = new Map(result.files.map((file) => [file.path, {
+    absolute: file.absolutePath || path.resolve(result.root, file.path),
+    root: file.sourceRoot || result.root,
+  }]));
+}
+function indexedFile(relative) {
+  const entry = indexedFiles.get(relative);
+  if (!entry) throw new Error("Invalid source path.");
+  const local = path.relative(entry.root, entry.absolute);
+  if (!local || local === ".." || local.startsWith(`..${path.sep}`) || path.isAbsolute(local)) throw new Error("Invalid source path.");
+  return entry;
+}
+function insideSourceRoot(root, file) {
+  const local = path.relative(root, file);
+  return local && local !== ".." && !local.startsWith(`..${path.sep}`) && !path.isAbsolute(local);
+}
 const EXCLUDED = new Set([
   ".git", ".venv", "venv", "env", "__pycache__", "node_modules", "dist",
   "build", ".mypy_cache", ".pytest_cache", ".ruff_cache", "site-packages",
@@ -21,9 +53,9 @@ const cacheDir = () => path.join(app.getPath("userData"), "analysis-cache");
 const cacheFile = (root) =>
   path.join(cacheDir(), `${crypto.createHash("sha1").update(rootKey(root)).digest("hex")}.json`);
 
-async function fingerprint(root) {
+async function fingerprint(root, stubOptions) {
   const files = [];
-  async function walk(dir) {
+  async function walk(dir, external = false, sourceRoot = root) {
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -34,13 +66,13 @@ async function fingerprint(root) {
       const full = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (EXCLUDED.has(entry.name)) continue;
-        await walk(full);
-      } else if (entry.name.endsWith(".py") || entry.name.endsWith(".pyi")) {
+        if (EXCLUDED.has(entry.name) && !(external && entry.name === "site-packages")) continue;
+        await walk(full, external, sourceRoot);
+      } else if ((external ? /\.(pyi|pxd)$/ : /\.(py|pyi|pyx|pxd|pxi)$/).test(entry.name)) {
         try {
           const stat = await fs.stat(full);
           files.push({
-            rel: path.relative(root, full).replace(/\\/g, "/"),
+            rel: (external ? `${sourceRoot.replace(/\\/g, "/")}/` : "") + path.relative(sourceRoot, full).replace(/\\/g, "/"),
             size: stat.size,
             mtime: Math.round(stat.mtimeMs),
           });
@@ -51,8 +83,11 @@ async function fingerprint(root) {
     }
   }
   await walk(root);
+  const stubPaths = [...stubOptions.paths];
+  if (stubOptions.useVenv) stubPaths.push(...[".venv", "venv", "env"].map((name) => path.join(root, name)));
+  for (const directory of [...new Set(stubPaths)]) await walk(directory, true, directory);
   files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  return files;
+  return { stubOptions, files };
 }
 
 async function readCache(root, fp) {
@@ -85,19 +120,19 @@ async function writeCache(root, result, fp) {
   }
 }
 
-async function loadIndex(root) {
-  const fp = await fingerprint(root);
+async function loadIndex(root, stubOptions) {
+  const fp = await fingerprint(root, stubOptions);
   const cached = await readCache(root, fp);
   if (cached) return cached;
-  const result = await analyze(root);
+  const result = await analyze(root, stubOptions);
   await writeCache(root, result, fp);
   return result;
 }
 
-async function reindex(root) {
-  const result = await analyze(root);
-  await writeCache(root, result, await fingerprint(root));
-  indexedPaths = new Set(result.files.map((file) => file.path));
+async function reindex(root, stubOptions = currentStubOptions) {
+  const result = await analyze(root, stubOptions);
+  await writeCache(root, result, await fingerprint(root, stubOptions));
+  registerIndex(result);
   return result;
 }
 
@@ -132,7 +167,9 @@ async function openRepository(root, remember = true) {
   } catch {
     throw new Error("This repository folder is unavailable. Choose another folder or remove it from recent repositories.");
   }
-  const result = await loadIndex(directory);
+  const settings = await readStubSettings();
+  const stubOptions = settings[rootKey(directory)] ? validStubOptions(settings[rootKey(directory)]) : { paths: [], useVenv: false };
+  const result = await loadIndex(directory, stubOptions);
   if (remember) {
     await saveRecentRepositories([
       { root: directory, name: result.name, lastOpened: new Date().toISOString() },
@@ -140,7 +177,9 @@ async function openRepository(root, remember = true) {
     ].slice(0, 10));
   }
   currentRoot = directory;
-  indexedPaths = new Set(result.files.map((file) => file.path));
+  currentStubOptions = stubOptions;
+  stopCanvasWatch();
+  registerIndex(result);
   return result;
 }
 function inspectDeclaration(file, target) {
@@ -161,6 +200,71 @@ function inspectDeclaration(file, target) {
   });
 }
 
+function stopCanvasWatch() {
+  if (canvasWatch) {
+    clearInterval(canvasWatch.timer);
+    for (const child of canvasWatch.children) child.kill();
+    canvasWatch = null;
+  }
+}
+function watchCanvas(files) {
+  if (!currentRoot || !Array.isArray(files) || files.length > 500 ||
+      !files.every((file) => indexedPaths.has(file?.path) && typeof file.source === 'string' && file.source.length <= 4_000_000))
+    throw new Error('Invalid canvas files.');
+  stopCanvasWatch();
+  const state = { root: currentRoot, children: new Set(), busy: false, timer: null,
+    files: files.map((file) => ({ ...file, stamp: null })) };
+  canvasWatch = state;
+  async function update() {
+    if (state.busy || canvasWatch !== state || window.isDestroyed()) return;
+    state.busy = true;
+    try {
+      for (const entry of state.files) {
+        if (canvasWatch !== state) break;
+        try {
+          const indexed = indexedFile(entry.path);
+          const file = indexed.absolute;
+          const realFile = await fs.realpath(file);
+          if (!insideSourceRoot(indexed.root, realFile)) throw new Error('Canvas file is outside its source folder.');
+          const stat = await fs.stat(realFile);
+          if (stat.size > 2 * 1024 * 1024) throw new Error('Canvas file exceeds the 2 MB limit.');
+          const stamp = `${stat.mtimeMs}:${stat.size}`;
+          if (entry.stamp === stamp) continue;
+          const result = await new Promise((resolve, reject) => {
+            const child = spawn('uv', ['run', '--no-project', '--script',
+              path.join(resources(), 'backend', 'canvas.py'), realFile],
+            { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+            state.children.add(child);
+            let output = '', error = '';
+            const timer = setTimeout(() => child.kill(), 30000);
+            child.stdout.setEncoding('utf8');
+            child.stdout.on('data', (data) => { output += data; if (output.length > 16_000_000) child.kill(); });
+            child.stderr.on('data', (data) => { error = (error + data).slice(-2000); });
+            child.on('error', reject);
+            child.stdin.on('error', () => {});
+            child.stdin.end(JSON.stringify({ source: entry.source }));
+            child.on('close', (code) => {
+              clearTimeout(timer); state.children.delete(child);
+              try { if (code !== 0) throw new Error(error || 'Could not track canvas file.'); resolve(JSON.parse(output)); }
+              catch (failure) { reject(failure); }
+            });
+          });
+          if (canvasWatch !== state || window.isDestroyed()) break;
+          entry.stamp = stamp;
+          if (result.status === 'found') entry.source = result.source;
+          window.webContents.send('canvas:update', { path: entry.path, ...result });
+        } catch (error) {
+          if (canvasWatch === state && !window.isDestroyed())
+            window.webContents.send('canvas:update', { path: entry.path, status: 'error', message: error.message });
+        }
+      }
+    } finally { state.busy = false; }
+  }
+  state.timer = setInterval(update, 850);
+  update();
+  return true;
+}
+
 function openDeclaration(target) {
   if (!currentRoot || !indexedPaths.has(target?.path) ||
       !Array.isArray(target.chain) || !target.chain.length ||
@@ -168,9 +272,8 @@ function openDeclaration(target) {
         typeof part.name === "string" && part.name.length < 200) ||
       !Number.isInteger(target.line) || target.line < 1)
     throw new Error("Invalid declaration target.");
-  const file = path.resolve(currentRoot, target.path);
-  if (!file.startsWith(currentRoot + path.sep))
-    throw new Error("Invalid declaration path.");
+  const indexed = indexedFile(target.path);
+  const file = indexed.absolute;
   const popup = new BrowserWindow({
     width: 360, height: 180, minWidth: 360, minHeight: 180,
     frame: false, alwaysOnTop: true, autoHideMenuBar: true,
@@ -190,6 +293,7 @@ function openDeclaration(target) {
     if (state.busy || popup.isDestroyed()) return;
     state.busy = true;
     try {
+      if (!insideSourceRoot(indexed.root, await fs.realpath(file))) throw new Error("Declaration is outside its source folder.");
       const stat = await fs.stat(file);
       const stamp = `${stat.mtimeMs}:${stat.size}`;
       if (stamp === state.lastStamp) return;
@@ -221,7 +325,7 @@ function openDeclaration(target) {
   update();
   return true;
 }
-function analyze(root) {
+function analyze(root, stubOptions) {
   return new Promise((resolve, reject) => {
     if (activeProcess)
       return reject(new Error("An analysis is already running."));
@@ -233,6 +337,8 @@ function analyze(root) {
         "--script",
         path.join(resources(), "backend", "analyzer.py"),
         root,
+        ...stubOptions.paths.flatMap((directory) => ["--stub-path", directory]),
+        ...(stubOptions.useVenv ? ["--use-venv"] : []),
       ],
       { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } },
     );
@@ -324,7 +430,7 @@ app.whenReady().then(async () => {
   handle("repo:open", async () => {
     const result = await dialog.showOpenDialog(window, {
       properties: ["openDirectory"],
-      title: "Open Python repository",
+      title: "Open Python or Cython repository",
     });
     return result.canceled ? null : openRepository(result.filePaths[0]);
   });
@@ -343,10 +449,32 @@ app.whenReady().then(async () => {
   handle("repo:close", () => {
     if (activeProcess) throw new Error("Wait for indexing to finish before closing the repository.");
     currentRoot = null;
+    stopCanvasWatch();
     indexedPaths = new Set();
+    indexedFiles = new Map();
     for (const state of popouts.values()) state.popup.close();
   });
   handle("declaration:open", openDeclaration);
+  handle("stubs:choose", async () => {
+    if (!currentRoot) throw new Error("Open a repository first.");
+    const result = await dialog.showOpenDialog(window, {
+      properties: ["openDirectory"], title: "Choose a stub folder, site-packages, or virtual environment",
+    });
+    return result.canceled ? null : fs.realpath(result.filePaths[0]);
+  });
+  handle("stubs:save", async (value) => {
+    if (!currentRoot) throw new Error("Open a repository first.");
+    const stubOptions = validStubOptions(value);
+    const result = await reindex(currentRoot, stubOptions);
+    const settings = await readStubSettings();
+    settings[rootKey(currentRoot)] = stubOptions;
+    await fs.mkdir(app.getPath("userData"), { recursive: true });
+    await fs.writeFile(`${stubSettingsFile()}.tmp`, JSON.stringify(settings), "utf8");
+    await fs.rename(`${stubSettingsFile()}.tmp`, stubSettingsFile());
+    currentStubOptions = stubOptions;
+    return result;
+  });
+  handle('canvas:watch', watchCanvas);
   ipcMain.handle("declaration:state", (event) => {
     const state = popouts.get(event.sender.id);
     if (!state || event.senderFrame !== event.sender.mainFrame)
@@ -411,6 +539,7 @@ app.whenReady().then(async () => {
   else window.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 });
 app.on("window-all-closed", () => {
+  stopCanvasWatch();
   if (activeProcess) activeProcess.kill();
   app.quit();
 });

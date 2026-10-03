@@ -1,7 +1,7 @@
 import { useState, Fragment } from "react";
 import { ChevronDown, ChevronRight, FolderOpen, FileCode2 } from "lucide-react";
 
-export default function FileTree({ files, selected, onSelect }) {
+export default function FileTree({ files, selected, onSelect, markedPaths }) {
   const [collapsed, setCollapsed] = useState({});
   const tree = {};
   for (const file of files) {
@@ -31,6 +31,7 @@ export default function FileTree({ files, selected, onSelect }) {
             >
               <FileCode2 size={13} />
               <span>{name}</span>
+              {markedPaths?.has(value.path) && <span className="mark-dot tree-mark" role="img" aria-label="Contains marks" title="Contains marks" />}
               <small>{value.symbols.length}</small>
             </button>
           );

@@ -16,12 +16,14 @@ import {
   Check,
   ArrowUpRight,
   Maximize2,
+  Frame,
 } from "lucide-react";
 import { Icon, basename } from "../util";
 import Resizer from "./Resizer";
 import SourceMinimap from "./SourceMinimap";
 import { declarationAtLine } from "../declaration";
 import { computeFoldRanges } from "../folding";
+import { selectedSourceLines } from '../source-selection';
 
 export default function SourceView({
   file,
@@ -62,8 +64,38 @@ export default function SourceView({
   onScroll,
   clearTabState,
   onPopDeclaration,
+  onAddToCanvas,
+  marks,
+  onToggleMark,
+  navigationId,
 }) {
   const bottomRef = useRef(null);
+  const pendingRevealRef = useRef(null);
+  const [canvasLines, setCanvasLines] = useState(null);
+  const lineAnchor = useRef(null);
+  useEffect(() => {
+    setCanvasLines(null); lineAnchor.current = null;
+  }, [file?.path, file?.source]);
+  useEffect(() => {
+    const update = () => {
+      const range = selectedSourceLines(codeRef.current);
+      setCanvasLines((previous) => {
+        if (!range) return previous?.origin === 'gutter' ? previous : null;
+        return previous?.start === range.start && previous?.end === range.end && previous?.origin === 'text' ? previous : range;
+      });
+    };
+    document.addEventListener('selectionchange', update);
+    return () => document.removeEventListener('selectionchange', update);
+  }, [codeRef]);
+  function addSourceToCanvas() {
+    const range = selectedSourceLines(codeRef.current) || canvasLines;
+    if (range) onAddToCanvas(null, range.start, range.end);
+    else if (declarationAtCursor) onAddToCanvas(declarationAtCursor);
+    else onAddToCanvas(null, line);
+    window.getSelection()?.removeAllRanges();
+    setCanvasLines(null);
+  }
+  const marksByLine = useMemo(() => new Map(marks.map((mark) => [mark.line, mark])), [marks]);
   const declarationAtCursor = declarationAtLine(file, line);
   const declarationsByLine = useMemo(() => new Map(
     (file?.symbols || [])
@@ -116,6 +148,25 @@ export default function SourceView({
   useEffect(() => {
     setCollapsed(new Set());
   }, [file?.path]);
+
+  useEffect(() => {
+    if (!foldRanges.some((range) => collapsed.has(range.start) && range.start < line - 1 && range.end >= line - 1)) return;
+    pendingRevealRef.current = line;
+    setCollapsed((prev) => {
+      const containing = foldRanges.filter((range) => range.start < line - 1 && range.end >= line - 1);
+      if (!containing.some((range) => prev.has(range.start))) return prev;
+      const next = new Set(prev);
+      containing.forEach((range) => next.delete(range.start));
+      return next;
+    });
+  }, [path, line, foldRanges, codeRef, navigationId]);
+
+  useEffect(() => {
+    if (pendingRevealRef.current !== line || hiddenLines.has(line - 1)) return;
+    codeRef.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "nearest" });
+    syncViewport(codeRef.current);
+    pendingRevealRef.current = null;
+  }, [hiddenLines, line, codeRef]);
 
   function toggleFold(start) {
     setCollapsed((prev) => {
@@ -210,6 +261,12 @@ export default function SourceView({
             </button>
           </span>
         )}
+        {file && <button
+          title={canvasLines ? `Add selected lines ${canvasLines.start}–${canvasLines.end} to canvas` : declarationAtCursor ? `Add ${declarationAtCursor.name} to canvas` : `Add line ${line} to canvas`}
+          aria-label="Add to canvas"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={addSourceToCanvas}
+        ><Frame size={13} />Add to canvas{canvasLines && <small> · {canvasLines.start}–{canvasLines.end}</small>}</button>}
         <span className="breadcrumb-end">{file?.lines || 0} lines</span>
       </div>
       <div className="source-shell">
@@ -224,7 +281,7 @@ export default function SourceView({
           {!file ? (
             <div className="welcome">
               <Code2 size={30} />
-              <h2>Open a Python repository</h2>
+              <h2>Open a Python or Cython repository</h2>
               <p>Inspect symbols, follow aliases, explore inheritance.</p>
               <button
                 className="primary"
@@ -239,7 +296,7 @@ export default function SourceView({
               </button>
             </div>
           ) : (
-            <div className="code" role="region" aria-label="Python source">
+            <div className="code" role="region" aria-label={file.language === "cython" ? "Cython source" : "Python source"}>
             {file.source.split("\n").map((text, row) => {
               if (hiddenLines.has(row)) return null;
               const rowRefs = referencesByLine.get(row + 1) || [];
@@ -248,12 +305,20 @@ export default function SourceView({
               );
               const fold = foldByStart.get(row);
               const declaration = declarationsByLine.get(row + 1);
+              const mark = marksByLine.get(row + 1);
               return (
                 <div
                   key={row}
                   data-line={row + 1}
-                  className={`code-line ${line === row + 1 ? "current-line" : ""}`}
+                  className={`code-line ${line === row + 1 ? "current-line" : ""} ${mark ? "marked-line" : ""} ${canvasLines && row + 1 >= canvasLines.start && row + 1 <= canvasLines.end ? 'canvas-selected-line' : ''}`}
                 >
+                  <button
+                    className={`mark-toggle ${mark ? "is-marked" : ""}`}
+                    aria-label={`${mark ? "Remove" : "Add"} mark at line ${row + 1}`}
+                    aria-pressed={Boolean(mark)}
+                    title={mark?.note || `${mark ? "Remove" : "Add"} mark · line ${row + 1}`}
+                    onClick={() => onToggleMark(path, row + 1)}
+                  ><span className="mark-dot" /></button>
                   <button
                     className={`fold-toggle ${fold ? "" : "fold-toggle-empty"}`}
                     aria-label={
@@ -274,21 +339,30 @@ export default function SourceView({
                         <ChevronDown size={12} />
                       ))}
                   </button>
+                  <span className="declaration-slot">
+                    {declaration && (
+                      <button className="declaration-pop" title={`Pop ${declaration.name}`} aria-label={`Pop ${declaration.name}`} onClick={() => onPopDeclaration(declaration)}>
+                        <Maximize2 size={11} />
+                      </button>
+                    )}
+                  </span>
                   <button
                     className="line-number"
-                    onClick={() => {
+                    onClick={(event) => {
+                      if (event.shiftKey) {
+                        const anchor = lineAnchor.current ?? line;
+                        setCanvasLines({ start: Math.min(anchor, row + 1), end: Math.max(anchor, row + 1), origin: 'gutter' });
+                      } else {
+                        lineAnchor.current = row + 1;
+                        setCanvasLines(null);
+                      }
                       setLine(row + 1);
                       setActiveReference(null);
                     }}
                   >
                     {row + 1}
                   </button>
-                  {declaration && (
-                    <button className="declaration-pop" title={`Pop ${declaration.name}`} aria-label={`Pop ${declaration.name}`} onClick={() => onPopDeclaration(declaration)}>
-                      <Maximize2 size={11} />
-                    </button>
-                  )}
-                  <span className="line-content">
+                  <span className="line-content" onPointerDown={() => setCanvasLines(null)}>
                     {(
                       tokens[row] || [
                         {
@@ -313,6 +387,7 @@ export default function SourceView({
                               : undefined
                           }
                           onClick={(event) => {
+                            if (selectedSourceLines(codeRef.current)) return;
                             setLine(row + 1);
                             if (ref) {
                               if (event.ctrlKey || event.metaKey) {
@@ -362,6 +437,7 @@ export default function SourceView({
             referencesByLine={referencesByLine}
             activeScope={activeScope}
             diagnostics={diagnostics}
+            marks={marks}
           />
         )}
       </div>

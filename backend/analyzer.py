@@ -1,9 +1,10 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = ["Cython==3.2.4"]
 # ///
 """Static Python repository index. Never imports or executes analyzed code."""
 from __future__ import annotations
+import argparse
 import ast
 import io
 import json
@@ -16,6 +17,8 @@ import tokenize
 from callgraph import link_calls
 from class_tracker import track_classes
 from definitions import link_definitions
+from cython_parser import SOURCE_SUFFIXES, annotation_text, parse_source
+from stub_paths import STUB_SUFFIXES, stub_roots, stub_module, index_priority
 
 EXCLUDED = {'.git', '.venv', 'venv', 'env', '__pycache__', 'node_modules', 'dist', 'build', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'site-packages'}
 MAX_FILE = 2_000_000
@@ -116,7 +119,7 @@ class Indexer(ast.NodeVisitor):
         return parent
 
     def visit_FunctionDef(self, node):
-        symbol = self.bind(node.name, node, 'function', ast.unparse(node.returns) if node.returns else None)
+        symbol = self.bind(node.name, node, 'function', annotation_text(node.returns) if node.returns else None)
         symbol['signature'] = f'{node.name}({ast.unparse(node.args)})'
         symbol['decorators'] = [ast.unparse(d) for d in node.decorator_list]
         for deco in node.decorator_list: self.visit(deco)
@@ -127,11 +130,18 @@ class Indexer(ast.NodeVisitor):
         if node.returns: self.visit_type(node.returns)
         parent = self.enter(node, node.name, 'function')
         symbol['bodyScopeId'] = self.scope['id']
-        for arg in args: self.bind(arg.arg, arg, 'parameter', ast.unparse(arg.annotation) if arg.annotation else None)
+        for arg in args: self.bind(arg.arg, arg, 'parameter', annotation_text(arg.annotation) if arg.annotation else None)
         for statement in node.body: self.visit(statement)
         self.scope = parent
 
     visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_CythonType(self, node):
+        symbol = self.bind(node.name, node, 'type', node.name)
+        parent = self.enter(node, node.name, 'class') if node.scoped else None
+        if node.scoped: symbol['bodyScopeId'] = self.scope['id']
+        for statement in node.body: self.visit(statement)
+        if parent: self.scope = parent
 
     def visit_Lambda(self, node):
         for default in node.args.defaults + [d for d in node.args.kw_defaults if d]: self.visit(default)
@@ -190,9 +200,9 @@ class Indexer(ast.NodeVisitor):
 
     def assign(self, target, value=None, annotation=None):
         if isinstance(target, (ast.Name, ast.Attribute)):
-            self.assignments.append({'target': ast.unparse(target), 'value': ast.unparse(value) if value else None, 'annotation': ast.unparse(annotation) if annotation else None, 'scopeId': self.scope['id'], **self.location(target)})
+            self.assignments.append({'target': ast.unparse(target), 'value': ast.unparse(value) if value else None, 'annotation': annotation_text(annotation) if annotation else None, 'scopeId': self.scope['id'], **self.location(target)})
         if isinstance(target, ast.Name):
-            symbol = self.bind(target.id, target, annotation=ast.unparse(annotation) if annotation else None, inferred=self.infer(value))
+            symbol = self.bind(target.id, target, annotation=annotation_text(annotation) if annotation else None, inferred=self.infer(value))
             for alias in self.aliases:
                 if alias['name'] == target.id and alias['scopeId'] == self.scope['id'] and alias['endLine'] is None: alias['endLine'] = target.lineno
             if isinstance(value, (ast.Name, ast.Attribute)):
@@ -213,7 +223,7 @@ class Indexer(ast.NodeVisitor):
         if isinstance(node.target, ast.Name) and ast.unparse(node.annotation) in ('TypeAlias', 'typing.TypeAlias'):
             symbol = next(s for s in self.symbols if s['id'] == self.binding_scope(node.target.id)['bindings'][node.target.id])
             symbol['kind'] = 'type'
-            symbol['type'] = ast.unparse(node.value) if node.value else 'unknown'
+            symbol['type'] = annotation_text(node.value) if node.value else 'unknown'
 
     def visit_AugAssign(self, node):
         if isinstance(node.target, ast.Name): self.reference(node.target.id, node.target)
@@ -323,58 +333,75 @@ class Indexer(ast.NodeVisitor):
             scope['nonlocals'] = sorted(scope['nonlocals'])
 
 
-def analyze(root):
+def analyze(root, stub_paths=(), use_venv=False):
     root = Path(root).resolve()
     if not root.is_dir(): raise ValueError('Repository folder does not exist')
-    files, diagnostics = [], []
-    for directory, dirs, names in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not Path(directory, d).is_symlink())
-        for name in sorted(names):
-            if not name.endswith(('.py', '.pyi')): continue
-            path = Path(directory, name)
-            relative = path.relative_to(root).as_posix()
-            if path.is_symlink(): continue
-            if len(files) >= MAX_FILES:
-                diagnostics.append({'path': relative, 'line': 1, 'severity': 'warning', 'message': f'Index limited to {MAX_FILES} Python files.'})
-                break
-            try:
-                if path.stat().st_size > MAX_FILE:
-                    diagnostics.append({'path': relative, 'line': 1, 'severity': 'warning', 'message': 'Skipped file larger than 2 MB.'})
-                    continue
-                with tokenize.open(path) as handle: source = handle.read()
-                index = Indexer(relative, source)
+    missing = []
+    roots = stub_roots(root, stub_paths, use_venv, missing)
+    files, diagnostics, indexed = [], [], set()
+    diagnostics.extend({'path': '@stubs', 'line': 1, 'severity': 'warning', 'message': f'Stub folder is unavailable: {directory}'} for directory in missing)
+    def scan(scan_root, external=False, number=0):
+        for directory, dirs, names in os.walk(scan_root, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in EXCLUDED and not Path(directory, d).is_symlink() and (external or Path(directory, d).resolve() not in roots))
+            for name in sorted(names):
+                if not name.endswith(STUB_SUFFIXES if external else SOURCE_SUFFIXES): continue
+                path = Path(directory, name)
+                local = path.relative_to(scan_root)
+                module = stub_module(scan_root, local) if external else None
+                if external and not module: continue
+                relative = f'@stubs/{number}-{scan_root.name}/{local.as_posix()}' if external else local.as_posix()
+                if external and path.resolve() in indexed: continue
+                if path.is_symlink(): continue
+                if len(files) >= MAX_FILES:
+                    diagnostics.append({'path': relative, 'line': 1, 'severity': 'warning', 'message': f'Index limited to {MAX_FILES} source files.'})
+                    break
                 try:
-                    tree = ast.parse(source, filename=relative)
-                    index.visit(tree)
-                    index.finish()
-                except SyntaxError as exc:
-                    diagnostics.append({'path': relative, 'line': exc.lineno or 1, 'severity': 'error', 'message': exc.msg})
-                files.append({'path': relative, 'source': source, 'lines': len(source.splitlines()), 'symbols': index.symbols, 'references': index.references, 'aliases': index.aliases, 'classes': index.classes, 'scopes': [{k: sorted(v) if isinstance(v, set) else v for k, v in s.items() if k != 'bindings'} for s in index.scopes], 'imports': index.imports, 'calls': index.calls, 'assignments': index.assignments})
-            except (OSError, UnicodeError, RecursionError, ValueError) as exc:
-                diagnostics.append({'path': relative, 'line': 1, 'severity': 'error', 'message': str(exc)})
-        if len(files) >= MAX_FILES: break
+                    if path.stat().st_size > MAX_FILE:
+                        diagnostics.append({'path': relative, 'line': 1, 'severity': 'warning', 'message': 'Skipped file larger than 2 MB.'})
+                        continue
+                    with tokenize.open(path) as handle: source = handle.read()
+                    index = Indexer(relative, source)
+                    try:
+                        tree, warnings = parse_source(source, relative)
+                        diagnostics.extend({'path': relative, 'line': line, 'severity': 'warning', 'message': message} for line, message in warnings)
+                        index.visit(tree)
+                        index.finish()
+                    except SyntaxError as exc:
+                        diagnostics.append({'path': relative, 'line': exc.lineno or 1, 'severity': 'error', 'message': exc.msg})
+                    indexed.add(path.resolve())
+                    files.append({'path': relative, **({'external': True, 'module': module, 'absolutePath': str(path.resolve()), 'sourceRoot': str(scan_root)} if external else {}), 'language': 'cython' if relative.endswith(('.pyx', '.pxd', '.pxi')) else 'python', 'source': source, 'lines': len(source.splitlines()), 'symbols': index.symbols, 'references': index.references, 'aliases': index.aliases, 'classes': index.classes, 'scopes': [{k: sorted(v) if isinstance(v, set) else v for k, v in s.items() if k != 'bindings'} for s in index.scopes], 'imports': index.imports, 'calls': index.calls, 'assignments': index.assignments})
+                except (OSError, UnicodeError, RecursionError, ValueError) as exc:
+                    diagnostics.append({'path': relative, 'line': 1, 'severity': 'error', 'message': str(exc)})
+            if len(files) >= MAX_FILES: break
+    scan(root)
+    for number, stub_root in enumerate(roots, 1):
+        scan(stub_root, external=True, number=number)
     link_repository(files)
     link_definitions(files)
     track_classes(files)
     call_graph = link_calls(files)
-    return {'name': root.name, 'root': str(root), 'files': files, 'diagnostics': diagnostics, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
+    return {'name': root.name, 'root': str(root), 'stubOptions': {'paths': list(stub_paths), 'useVenv': use_venv}, 'stubRoots': [str(p) for p in roots], 'files': files, 'diagnostics': diagnostics, 'callGraph': call_graph, 'stats': {'files': len(files), 'lines': sum(f['lines'] for f in files), 'symbols': sum(len(f['symbols']) for f in files), 'classes': sum(len(f['classes']) for f in files), 'calls': len(call_graph['sites'])}}
 
 
 def link_repository(files):
     exports = {}
+    by_file = {f['path']: f for f in files}
     by_id = {s['id']: s for f in files for s in f['symbols']}
     for file in files:
-        module = file['path'].rsplit('.', 1)[0].replace('/', '.')
+        module = file.get('module') or file['path'].rsplit('.', 1)[0].replace('/', '.')
         if module.endswith('.__init__'): module = module[:-9]
         file['module'] = module
         for symbol in file['symbols']:
-            if symbol['scopeName'] == '<module>': exports[f"{module}.{symbol['name']}"] = symbol['id']
+            if symbol['scopeName'] == '<module>':
+                for import_module in dict.fromkeys((module, module.removeprefix('src.'))):
+                    key = f"{import_module}.{symbol['name']}"
+                    if key not in exports or index_priority(file) > index_priority(by_file[by_id[exports[key]]['path']]): exports[key] = symbol['id']
 
     def qualified(file, target):
         if not target.startswith('.'): return target
         count = len(target) - len(target.lstrip('.'))
         parts = file['module'].split('.')
-        if not file['path'].endswith('__init__.py'): parts = parts[:-1]
+        if Path(file['path']).stem != '__init__': parts = parts[:-1]
         return '.'.join(parts[:max(0, len(parts) - count + 1)] + [target.lstrip('.')])
 
     def resolve(file, name, scope_id, line, seen=None):
@@ -417,7 +444,12 @@ def link_repository(files):
 if __name__ == '__main__':
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-        print(json.dumps(analyze(sys.argv[1]), ensure_ascii=False))
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('repository')
+        parser.add_argument('--stub-path', action='append', default=[])
+        parser.add_argument('--use-venv', action='store_true')
+        args = parser.parse_args()
+        print(json.dumps(analyze(args.repository, args.stub_path, args.use_venv), ensure_ascii=False))
     except Exception as exc:
         print(json.dumps({'error': str(exc)}))
         sys.exit(1)

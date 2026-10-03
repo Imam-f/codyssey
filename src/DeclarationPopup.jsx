@@ -51,13 +51,13 @@ export default function DeclarationPopup() {
     let active = true;
     initHighlighter()
       .then((highlight) => {
-        if (active) setHighlighted({ source, tokens: highlight(source) });
+        if (active) setHighlighted({ source, tokens: highlight(source, /\.(pyx|pxd|pxi)$/.test(target?.path || "") ? "cython" : "python") });
       })
       .catch(() => {
         if (active) setHighlighted({ source, tokens: [] });
       });
     return () => { active = false; };
-  }, [source]);
+  }, [source, target?.path]);
   const tokens = highlighted.source === source ? highlighted.tokens : [];
   useLayoutEffect(() => {
     if (!current || current.status === "loading") return;
@@ -109,7 +109,7 @@ export default function DeclarationPopup() {
               <strong>{target?.chain.map((part) => part.name).join(".") || "Loading…"}</strong>
               <span className="popup-info-path">{target?.path || ""}{current?.line ? `:${current.line}–${current.endLine}` : ""}</span>
               {current?.status === "found" && <span className="popup-info-status">Live</span>}
-              {current?.status === "stale" && <span className="popup-info-status stale">Waiting for valid Python</span>}
+              {current?.status === "stale" && <span className="popup-info-status stale">Waiting for valid source</span>}
             </div>
           </div>
           <button className="popup-window-button popup-close-button" aria-label="Close declaration window" title="Close" onClick={() => window.codyssey.closeDeclaration()}>

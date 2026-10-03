@@ -43,9 +43,10 @@ export default function StatusBar({
                     : "Loading parser"}
               </span>
             )}
-            <span>Python AST</span>
+            <span>{file?.language === "cython" ? "Cython AST" : "Python AST"}</span>
             {file && (
               <>
+                {file.external && <span title={file.absolutePath}>Dependency stub</span>}
                 <span>UTF-8</span>
                 <span>Ln {line}</span>
               </>

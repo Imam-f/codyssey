@@ -7,6 +7,7 @@ import {
   ListTree,
   PanelLeftClose,
   PanelLeftOpen,
+  Frame,
 } from "lucide-react";
 import { initHighlighter } from "./highlight";
 import CallGraph from "./CallGraph";
@@ -23,6 +24,11 @@ import Inspector from "./components/Inspector";
 import CommandPalette from "./components/CommandPalette";
 import StatusBar from "./components/StatusBar";
 import Welcome from "./components/Welcome";
+import StubSettings from "./components/StubSettings";
+import FreeCanvas from './components/FreeCanvas';
+import useMarks from "./useMarks";
+import { nextMark } from "./marks";
+import MarksPanel from "./components/MarksPanel";
 
 function App() {
   const [repo, setRepo] = useState(null),
@@ -32,6 +38,8 @@ function App() {
     [recentLoading, setRecentLoading] = useState(true);
   const loadingRef = useRef(false);
   const [callFocus, setCallFocus] = useState(null);
+  const [navigationId, setNavigationId] = useState(0);
+  const [canvasRequest, setCanvasRequest] = useState(null);
   const [activeReference, setActiveReference] = useState(null);
   const [path, setPath] = useState(""),
     [selectedId, setSelectedId] = useState(null),
@@ -45,6 +53,7 @@ function App() {
   const [palette, setPalette] = useState(false),
     [paletteQuery, setPaletteQuery] = useState(""),
     [sidebar, setSidebar] = useState(true);
+  const [stubSettings, setStubSettings] = useState(false);
   const [tokens, setTokens] = useState([]),
     [highlightReady, setHighlightReady] = useState(false),
     [highlightError, setHighlightError] = useState("");
@@ -62,6 +71,33 @@ function App() {
     sidebarRef = useRef(null),
     inspectorRef = useRef(null);
   const file = repo?.files.find((f) => f.path === path);
+  const { marks, toggleMark, removeMark, updateNote } = useMarks(repo, setError);
+  const fileMarks = useMemo(() => marks.filter((mark) => mark.path === path), [marks, path]);
+  const markedPaths = useMemo(() => new Set(marks.map((mark) => mark.path)), [marks]);
+  function travelMarks(direction) {
+    const target = nextMark(marks, path, line, direction);
+    if (target) navigate(target);
+  }
+  function focusCanvasSource(target) {
+    saveTabState();
+    setPath(target.path);
+    setLine(target.line);
+    setActiveReference(null);
+    setSelectedId(null);
+    setTabs((previous) => previous.includes(target.path) ? previous : [...previous, target.path]);
+  }
+  const marksPanel = repo && <MarksPanel
+    key={repo.root}
+    marks={marks}
+    path={path}
+    line={line}
+    canMark={Boolean(file)}
+    onToggle={() => toggleMark(path, line)}
+    onNavigate={navigate}
+    onTravel={travelMarks}
+    onRemove={removeMark}
+    onNote={updateNote}
+  />;
   const referencesByLine = useMemo(() => {
     const map = new Map();
     for (const ref of file?.references || []) {
@@ -132,7 +168,8 @@ function App() {
       setRepo(data);
       setNotice("");
       setPalette(false);
-      if (method !== "refresh") {
+      if (!["refresh", "saveStubOptions"].includes(method)) {
+        setCanvasRequest(null);
         setView("source");
         setInspector("symbol");
         setBottom("references");
@@ -158,6 +195,7 @@ function App() {
       setHistory([]);
       setHistoryIndex(-1);
       setRecent(await api.recent());
+      return data;
     } catch (e) {
       setError(e.message);
     } finally {
@@ -170,6 +208,8 @@ function App() {
     try {
       await api.close();
       setRepo(null);
+      setStubSettings(false);
+      setCanvasRequest(null);
       setPath("");
       setSelectedId(null);
       setActiveReference(null);
@@ -223,7 +263,7 @@ function App() {
       initHighlighter()
         .then((highlight) => {
           if (!canceled) {
-            setTokens(highlight(file.source));
+            setTokens(highlight(file.source, file.language));
             setHighlightReady(true);
           }
         })
@@ -243,7 +283,7 @@ function App() {
       return;
     }
     el.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [line, path, tokens, view]);
+  }, [line, path, tokens, view, navigationId]);
   useEffect(() => {
     if (notice) {
       const timer = setTimeout(() => setNotice(""), 3000);
@@ -278,6 +318,7 @@ function App() {
 
   function navigate(target, remember = true, origin = null) {
     if (!target) return;
+    setNavigationId((value) => value + 1);
     saveTabState();
     const switching =
       !target.line && !target.id && !target.symbolId && !target.reference;
@@ -343,6 +384,12 @@ function App() {
       setError(e.message);
     }
   }
+  function addToCanvas(symbol = null, start = line, end = start) {
+    const owner = symbol ? repo.files.find((item) => item.path === symbol.path) : file;
+    if (!owner) return;
+    setCanvasRequest({ id: crypto.randomUUID(), file: owner, symbol, start, end });
+    setView('canvas');
+  }
   async function exportReport() {
     try {
       if (await api.export(JSON.stringify(repo, null, 2)))
@@ -353,6 +400,17 @@ function App() {
   }
   useEffect(() => {
     const keydown = (e) => {
+      const typing = e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true']");
+      if (repo && ["source", "canvas"].includes(view) && !palette && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === "F9" && !e.shiftKey && file) {
+          e.preventDefault();
+          toggleMark(path, line);
+        }
+        if (e.key === "F2") {
+          e.preventDefault();
+          travelMarks(e.shiftKey ? -1 : 1);
+        }
+      }
       if (repo && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setPalette((v) => !v);
@@ -396,7 +454,11 @@ function App() {
         onDismissError={() => setError("")}
         onClose={closeRepository}
         onOpenInVSCode={openInVSCode}
+        onStubSettings={() => { setError(""); setStubSettings(true); }}
       />
+      {repo && stubSettings && <StubSettings options={repo.stubOptions} busy={busy} error={error}
+        onClose={() => setStubSettings(false)}
+        onApply={async (options) => { if (await load("saveStubOptions", options)) setStubSettings(false); }} />}
       {!repo ? (
         <Welcome
           busy={busy}
@@ -420,6 +482,7 @@ function App() {
             selectedId={selectedId}
             navigate={navigate}
             file={file}
+            markedPaths={markedPaths}
           />
         )}
         {sidebar && (
@@ -463,6 +526,12 @@ function App() {
               >
                 <Box size={14} />
                 Class tracker
+              </button>
+              <button
+                className={view === 'canvas' ? 'active' : ''}
+                onClick={() => setView('canvas')}
+              >
+                <Frame size={14} />Free canvas
               </button>
               <button
                 className={view === "calls" ? "active" : ""}
@@ -536,7 +605,19 @@ function App() {
               onScroll={handleSourceScroll}
               clearTabState={clearTabState}
               onPopDeclaration={popDeclaration}
+              onAddToCanvas={addToCanvas}
+              marks={fileMarks}
+              onToggleMark={toggleMark}
+              navigationId={navigationId}
             />
+          </div>
+          <div
+            className="view-pane"
+            style={{ display: view === 'canvas' ? undefined : 'none' }}
+          >
+            <FreeCanvas key={repo.root} repo={repo} active={view === 'canvas'} onNavigate={navigate} request={canvasRequest}
+              marks={marks} onToggleMark={toggleMark} onSourceLocation={focusCanvasSource}
+              marksPanel={view === 'canvas' ? marksPanel : null} />
           </div>
           <div
             className="view-pane"
@@ -563,7 +644,7 @@ function App() {
             <InheritanceGraph classes={classes} onNavigate={navigate} />
           </div>
         </main>
-        {view !== "calls" && (
+        {view !== 'canvas' && (
           <>
             <Resizer
               orientation="vertical"
@@ -575,11 +656,11 @@ function App() {
               sign={-1}
               onResize={setInspectorWidth}
             />
-            <Inspector
-              ref={inspectorRef}
+            <aside className="right-sidebar" aria-label="Details and marks" ref={inspectorRef} style={{ width: inspectorWidth }}>
+            {view !== "calls" && <Inspector
               inspector={inspector}
               setInspector={setInspector}
-              inspectorWidth={inspectorWidth}
+              inspectorWidth="100%"
               selected={selected}
               definition={definition}
               aliases={aliases}
@@ -593,7 +674,9 @@ function App() {
               focusCall={focusCall}
               path={path}
               onPopDeclaration={popDeclaration}
-            />
+            />}
+            {marksPanel}
+            </aside>
           </>
         )}
       </div>

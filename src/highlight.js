@@ -32,7 +32,7 @@ export function initHighlighter() {
       ["def" "class" "return" "if" "else" "elif" "for" "while" "in" "not" "and" "or" "is" "import" "from" "as" "with" "try" "except" "finally" "raise" "pass" "break" "continue" "lambda" "yield" "async" "await" "global" "nonlocal" "assert" "del"] @keyword
     `,
       );
-      return (source) => {
+      return (source, sourceLanguage = "python") => {
         const tree = parser.parse(source);
         const captures = query.captures(tree.rootNode);
         const tokens = [];
@@ -65,6 +65,26 @@ export function initHighlighter() {
               priority: priority[name],
             });
           }
+        }
+        if (sourceLanguage === "cython") {
+          const keywords = new Set(["cdef", "cpdef", "ctypedef", "cimport", "include", "extern", "public", "readonly", "api", "inline", "nogil", "gil", "noexcept", "struct", "union", "enum", "cppclass", "fused", "DEF", "IF", "ELIF", "ELSE"]);
+          const types = new Set(["void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "bint", "size_t", "Py_ssize_t"]);
+          source.split("\n").forEach((line, row) => {
+            const ranges = tokens[row] ||= [];
+            const add = (start, end, kind) => {
+              if (ranges.some((r) => ["comment", "string"].includes(r.kind) && r.start < end && r.end > start)) return;
+              ranges.push({ start, end, kind, priority: priority[kind] });
+            };
+            for (const match of line.matchAll(/\b[A-Za-z_]\w*\b/g)) {
+              const kind = keywords.has(match[0]) ? "keyword" : types.has(match[0]) ? "type" : null;
+              if (kind) add(match.index, match.index + match[0].length, kind);
+            }
+            const declaration = line.match(/^\s*(?:cdef|cpdef|def)\s+.*?\b([A-Za-z_]\w*)\s*\(/);
+            if (declaration) {
+              const start = declaration[0].lastIndexOf(declaration[1]);
+              add(start, start + declaration[1].length, "function");
+            }
+          });
         }
         tree.delete();
         return source.split("\n").map((line, row) => {

@@ -13,6 +13,7 @@ const Sidebar = forwardRef(function Sidebar(
     selectedId,
     navigate,
     file,
+    markedPaths,
   },
   ref,
 ) {
@@ -43,9 +44,10 @@ const Sidebar = forwardRef(function Sidebar(
           )}
           selected={path}
           onSelect={(f) => navigate({ path: f.path })}
+          markedPaths={markedPaths}
         />
         {repo && !repo.files.length && (
-          <p className="empty">No Python files found.</p>
+          <p className="empty">No Python or Cython files found.</p>
         )}
       </div>
       <div className="panel-heading outline-heading">

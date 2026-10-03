@@ -1,0 +1,110 @@
+import { _electron as electron } from '@playwright/test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
+delete env.CODYSSEY_DEV_URL;
+const profile = await mkdtemp(path.join(tmpdir(), 'codyssey-canvas-profile-'));
+const fixture = await mkdtemp(path.join(tmpdir(), 'codyssey-canvas-fixture-'));
+const sourceFile = path.join(fixture, 'example.py');
+await writeFile(sourceFile, 'class Example:\n    def run(self):\n        value = 1\n        return value\n');
+const app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env });
+try {
+  const page = await app.firstWindow();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, fixture);
+  await page.getByTitle('Open repository · Ctrl+O').click();
+  await page.getByText('Indexed', { exact: true }).waitFor({ timeout: 60000 });
+  assert.equal(await page.locator('.breadcrumb').getByRole('button', { name: 'Add to canvas', exact: true }).count(), 1);
+  await page.getByRole('button', { name: 'Add to canvas', exact: true }).click();
+  await page.locator('.canvas-code').waitFor();
+  assert.match(await page.locator('.canvas-code').textContent(), /class Example/);
+  await page.getByRole('button', { name: 'Add code', exact: true }).click();
+  await page.getByRole('button', { name: 'Whole function', exact: true }).click();
+  await page.locator('.canvas-declaration-list button').first().click();
+  await page.getByLabel('Canvas x', { exact: true }).fill('520');
+  await page.getByRole('button', { name: 'Add code', exact: true }).click();
+  await page.getByRole('button', { name: 'Code lines', exact: true }).click();
+  await page.getByLabel('From line', { exact: true }).fill('3');
+  await page.getByLabel('To line', { exact: true }).fill('4');
+  await page.getByRole('button', { name: 'Add line range' }).click();
+  await page.getByLabel('Canvas y', { exact: true }).fill('420');
+  await page.locator('.canvas-live').first().getByText('Live', { exact: true }).waitFor({ timeout: 10000 });
+  await writeFile(sourceFile, '# heading\n\nclass Example:\n    def run(self):\n        value = 2\n        extra = 3\n        return value + extra\n');
+  await page.waitForFunction(() => [...document.querySelectorAll('.canvas-code-body')].every((element) => element.textContent.includes('value = 2')), null, { timeout: 15000 });
+  assert.match(await page.locator('.canvas-code-location').last().textContent(), /:5–7/);
+  assert.match(await page.locator('.canvas-code').last().textContent(), /extra = 3/);
+  await writeFile(sourceFile, 'def broken(:\n');
+  await page.locator('.canvas-code .canvas-tracking-message').first().waitFor({ timeout: 15000 });
+  assert.match(await page.locator('.canvas-code').last().textContent(), /value = 2/);
+  await writeFile(sourceFile, '# heading\n\nclass Example:\n    def run(self):\n        value = 4\n        extra = 3\n        return value + extra\n');
+  await page.waitForFunction(() => [...document.querySelectorAll('.canvas-code-body')].every((element) => element.textContent.includes('value = 4')), null, { timeout: 15000 });
+  await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
+  const canvas = page.getByRole('region', { name: 'Free canvas', exact: true });
+  const rect = await canvas.boundingBox();
+  async function draw(name, x, y, dx, dy) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await page.mouse.move(rect.x + x, rect.y + y); await page.mouse.down();
+    await page.mouse.move(rect.x + x + dx, rect.y + y + dy, { steps: 5 }); await page.mouse.up();
+  }
+  // Place drawings in a clear part of the canvas using a known viewport.
+  await page.evaluate(() => document.querySelector('.canvas-surface').dispatchEvent(new WheelEvent('wheel', { deltaX: -1000, deltaY: 0, bubbles: true })));
+  for (const [name, type] of [['Box', 'box'], ['Line', 'line'], ['Arrow', 'arrow'], ['Bend arrow', 'bend'], ['Text', 'text'], ['Frame', 'frame']]) {
+    await draw(name, 40, 40 + ['box', 'line', 'arrow', 'bend', 'text', 'frame'].indexOf(type) * 65, 170, 45);
+    assert.equal(await page.locator(`[data-type="${type}"]`).count(), 1);
+  }
+  await page.getByLabel('Canvas text', { exact: true }).fill('Review');
+  await page.getByRole('button', { name: 'Use color #79b8e8', exact: true }).click();
+  await page.getByLabel('Canvas thickness', { exact: true }).fill('5');
+  assert.match(await page.locator('.canvas-frame').getAttribute('style'), /#79b8e8/);
+  await page.getByRole('button', { name: 'Undo canvas change', exact: true }).click();
+  await page.getByRole('button', { name: 'Redo canvas change', exact: true }).click();
+  await canvas.click({ position: { x: 300, y: 450 } });
+  await page.keyboard.press('Control+a');
+  await page.getByRole('button', { name: 'Group selection', exact: true }).click();
+  const itemStyle = () => page.locator('.canvas-item').evaluateAll((elements) => elements.map((element) => ({ id: element.dataset.canvasId, x: parseFloat(element.style.left), y: parseFloat(element.style.top), w: parseFloat(element.style.width), h: parseFloat(element.style.height) })));
+  const groupedBefore = await itemStyle();
+  const box = await page.locator('.canvas-box').boundingBox();
+  await page.mouse.move(box.x + 20, box.y + 20); await page.mouse.down(); await page.mouse.move(box.x + 50, box.y + 50, { steps: 4 }); await page.mouse.up();
+  const groupedAfter = await itemStyle();
+  assert.ok(groupedAfter.every((item) => item.x > groupedBefore.find((previous) => previous.id === item.id).x && item.y > groupedBefore.find((previous) => previous.id === item.id).y));
+  await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
+  const groupResize = await page.getByRole('button', { name: 'Resize selection' }).boundingBox();
+  await page.mouse.move(groupResize.x + 5, groupResize.y + 5); await page.mouse.down(); await page.mouse.move(groupResize.x + 35, groupResize.y + 35, { steps: 4 }); await page.mouse.up();
+  const groupedResized = await itemStyle();
+  assert.ok(groupedResized.every((item) => item.w > groupedAfter.find((previous) => previous.id === item.id).w && item.h > groupedAfter.find((previous) => previous.id === item.id).h));
+  await page.getByRole('button', { name: 'Ungroup selection', exact: true }).click();
+  await page.getByRole('button', { name: 'Frame selection', exact: true }).click();
+  assert.equal(await page.locator('.canvas-frame').count(), 2);
+  await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
+  const before = await page.locator('.canvas-frame').first().boundingBox();
+  const framedBefore = await itemStyle();
+  await page.locator('.canvas-frame-title').first().hover();
+  await page.mouse.down(); await page.mouse.move(before.x + 70, before.y + 60, { steps: 4 }); await page.mouse.up();
+  const framedAfter = await itemStyle();
+  assert.ok(framedAfter.every((item) => item.x > framedBefore.find((previous) => previous.id === item.id).x && item.y > framedBefore.find((previous) => previous.id === item.id).y));
+  await page.getByRole('button', { name: 'Fit canvas', exact: true }).click();
+  const beforeResize = await page.locator('.canvas-frame').first().boundingBox();
+  const resize = await page.getByRole('button', { name: 'Resize selection' }).boundingBox();
+  await page.mouse.move(resize.x + 5, resize.y + 5); await page.mouse.down(); await page.mouse.move(resize.x + 35, resize.y + 35, { steps: 4 }); await page.mouse.up();
+  assert.ok((await page.locator('.canvas-frame').first().boundingBox()).width > beforeResize.width);
+  await page.waitForFunction(() => {
+    const key = Object.keys(localStorage).find((key) => key.startsWith('codyssey:canvas:'));
+    return key && JSON.parse(localStorage.getItem(key)).items.length === 10;
+  });
+  // Close immediately after an edit to exercise the autosave flush on unmount.
+  await page.getByLabel('Canvas text', { exact: true }).fill('Review saved');
+  await page.getByRole('button', { name: 'Close repository', exact: true }).click();
+  await page.getByTitle('Open repository · Ctrl+O').click();
+  await page.getByText('Indexed', { exact: true }).waitFor({ timeout: 60000 });
+  await page.getByRole('button', { name: 'Free canvas', exact: true }).click();
+  assert.equal(await page.locator('.canvas-item').count(), 10);
+  assert.equal(await page.locator('.canvas-frame-title').filter({ hasText: /^Review$/ }).count(), 1);
+  assert.equal(await page.locator('.canvas-frame-title').filter({ hasText: /^Review saved$/ }).count(), 1);
+  assert.deepEqual(errors, []);
+  console.log('Canvas drawings, code tracking, styles, grouping, frames, resizing, undo, and persistence passed.');
+} finally { await app.close(); }

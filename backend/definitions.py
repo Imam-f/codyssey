@@ -1,17 +1,17 @@
 """Link source identifiers to indexed definitions without executing imports."""
 import ast
 from callgraph import CallResolver
+from stub_paths import index_priority
 
 
 class DefinitionResolver(CallResolver):
     def __init__(self, files):
         super().__init__(files)
         self.modules = {}
-        for file in files:
+        for file in sorted(files, key=index_priority, reverse=True):
             for name in (file['module'], file['module'].removeprefix('src.')):
                 # Prefer source over a stub when both are indexed.
-                if name not in self.modules or file['path'].endswith('.py'):
-                    self.modules[name] = file
+                self.modules.setdefault(name, file)
 
     @staticmethod
     def destination(symbol):

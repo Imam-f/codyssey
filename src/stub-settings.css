@@ -1,0 +1,30 @@
+.stub-settings {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #383e47;
+  border-radius: 12px;
+  color: #d7dce5;
+  background: #181c22;
+  box-shadow: 0 24px 80px #0008;
+  font-size: 13px;
+}
+.stub-settings::backdrop { background: #090b10b3; }
+.stub-settings-header, .stub-settings-footer, .stub-paths li { display: flex; align-items: center; gap: 10px; }
+.stub-settings-header { justify-content: space-between; }
+.stub-settings h2 { margin: 0; font-size: 19px; }
+.stub-settings h3 { margin: 22px 0 10px; font-size: 13px; }
+.stub-settings p { line-height: 1.6; }
+.stub-settings button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #383e47; border-radius: 6px; padding: 7px 10px; }
+.stub-settings button:disabled { opacity: .5; cursor: default; }
+.stub-settings button:hover:not(:disabled) { background: #28303b; }
+.stub-venv-option { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.stub-settings-help, .stub-settings-footer span { color: #949eae; font-size: 12px; }
+.stub-paths { list-style: none; padding: 0; }
+.stub-paths li { padding: 8px 0; border-bottom: 1px solid #303741; }
+.stub-paths li span { flex: 1; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
+.stub-settings-footer { justify-content: flex-end; margin-top: 24px; }
+.stub-settings-footer span { margin-right: auto; }
+.stub-settings .stub-apply { background: #276655; border-color: #398772; }
+.stub-settings-error { color: #f19393; }

@@ -9,6 +9,7 @@ import {
   ExternalLink,
   House,
   X,
+  Library,
 } from "lucide-react";
 import { appVersion, isDesktop } from "../util";
 
@@ -23,6 +24,7 @@ export default function Toolbar({
   onDismissError,
   onClose,
   onOpenInVSCode,
+  onStubSettings,
 }) {
   return (
     <>
@@ -60,6 +62,9 @@ export default function Toolbar({
           <kbd>Ctrl P</kbd>
         </button>
         <div className="toolbar-actions">
+          {repo && <button onClick={onStubSettings} disabled={busy || !isDesktop}
+            title={isDesktop ? "Configure external dependency stubs" : "Available in the desktop app"}
+            aria-label="Dependency stubs"><Library size={15} /><span>Stubs</span></button>}
           {repo && (
             <button
               onClick={onOpenInVSCode}

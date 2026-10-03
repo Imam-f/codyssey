@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = ["Cython==3.2.4"]
 # ///
 import sys
 import tempfile
@@ -13,13 +13,13 @@ from analyzer import analyze
 
 
 class AnalyzerTests(unittest.TestCase):
-    def index(self, files):
+    def index(self, files, **options):
         with tempfile.TemporaryDirectory() as root:
             for name, source in files.items():
                 path = Path(root, name)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(source, encoding='utf8')
-            return analyze(root)
+            return analyze(root, **options)
 
     def test_function_scope_and_shadowing(self):
         repo = self.index({'a.py': 'x = 1\ndef f(x: int):\n    y = x\n    return y + x\ndef g():\n    x = 2\n    return x\n'})
@@ -239,6 +239,207 @@ class DefinitionTests(unittest.TestCase):
         attribute=self.reference(repo,'use.py','café',6)
         self.assertEqual(attribute['column'],22)
         self.assertEqual(attribute['definition']['path'],'lib.py')
+
+
+class ExternalStubTests(unittest.TestCase):
+    index = AnalyzerTests.index
+
+    def test_opt_in_stubs_link_reexports_types_and_methods(self):
+        sources = {
+            'main.py': 'from dependency import Client, connect\ndef run(client: Client):\n    connect()\n    client.save()\n',
+            'stubs/dependency/__init__.pyi': 'from .api import Client, connect\n',
+            'stubs/dependency/api.pyi': 'class Client:\n    def save(self) -> int: ...\ndef connect() -> Client: ...\n',
+            'stubs/dependency/runtime.py': 'raise RuntimeError("must never execute or index")\n',
+        }
+        repo = self.index(sources, stub_paths=['stubs'])
+        self.assertEqual(repo['diagnostics'], [])
+        self.assertEqual(len(repo['files']), 3)
+        main = next(f for f in repo['files'] if f['path'] == 'main.py')
+        for name in ('Client', 'connect', 'save'):
+            ref = next(r for r in main['references'] if r['name'] == name)
+            self.assertTrue(ref['definition']['path'].startswith('@stubs/'))
+        client = next(s for s in main['symbols'] if s['name'] == 'client')
+        self.assertTrue(client['typeTargets'])
+        external = next(f for f in repo['files'] if f.get('module') == 'dependency.api')
+        self.assertTrue(external['external'])
+        self.assertEqual(Path(external['absolutePath']).name, 'api.pyi')
+
+    def test_venv_stub_packages_windows_unix_and_disabled_by_default(self):
+        sources = {
+            'main.py': 'from dependency import work\nwork()\n',
+            '.venv/Lib/site-packages/dependency-stubs/__init__.pyi': 'def work() -> int: ...\n',
+            'venv/pyvenv.cfg': 'home = unused\n',
+            'venv/lib/python3.12/site-packages/unixpkg/__init__.pyi': 'LIMIT: int\n',
+            '.venv/Lib/site-packages/runtime.py': 'raise RuntimeError("never import")\n',
+        }
+        disabled = self.index(sources)
+        self.assertEqual(len(disabled['files']), 1)
+        self.assertIsNone(next(r for r in disabled['files'][0]['references'] if r['role'] == 'call')['definition'])
+        enabled = self.index(sources, use_venv=True)
+        self.assertEqual(len(enabled['files']), 3)
+        self.assertTrue(next(r for r in enabled['files'][0]['references'] if r['role'] == 'call')['definition']['path'].endswith('__init__.pyi'))
+        self.assertEqual({f['module'] for f in enabled['files']}, {'main', 'dependency', 'unixpkg'})
+
+    def test_project_wins_and_cython_dependency_pxd_resolves(self):
+        repo = self.index({
+            'dependency.py': 'def work(): return 1\n',
+            'stubs/dependency.pyi': 'def work() -> int: ...\n',
+            'stubs/c_library.pxd': 'cdef double scale(double value)\n',
+            'main.pyx': 'from dependency import work\nfrom c_library cimport scale\ncpdef double run():\n    return scale(work())\n',
+        }, stub_paths=['stubs'])
+        self.assertEqual(repo['diagnostics'], [])
+        main = next(f for f in repo['files'] if f['path'] == 'main.pyx')
+        work = next(r for r in main['references'] if r['name'] == 'work' and r['role'] == 'call')
+        scale = next(r for r in main['references'] if r['name'] == 'scale' and r['role'] == 'call')
+        self.assertEqual(work['definition']['path'], 'dependency.py')
+        self.assertTrue(scale['definition']['path'].endswith('c_library.pxd'))
+
+    def test_typeshed_layout_and_bad_path(self):
+        repo = self.index({
+            'main.py': 'from custom import work\nwork()\n',
+            'typeshed/stdlib/standard.pyi': 'VALUE: int\n',
+            'typeshed/stubs/custom/custom/__init__.pyi': 'def work(): ...\n',
+        }, stub_paths=['typeshed'])
+        self.assertEqual({f['module'] for f in repo['files']}, {'main', 'standard', 'custom'})
+        missing = self.index({'main.py': ''}, stub_paths=['missing'])
+        self.assertEqual(len(missing['files']), 1)
+        self.assertEqual(missing['diagnostics'][0]['severity'], 'warning')
+        self.assertIn('Stub folder is unavailable', missing['diagnostics'][0]['message'])
+
+    def test_src_project_types_take_precedence_over_external_stubs(self):
+        repo = self.index({
+            'src/dependency.py': 'class Client:\n    def save(self): return 1\n',
+            'stubs/dependency.pyi': 'class Client:\n    def save(self) -> int: ...\n',
+            'main.py': 'from dependency import Client\nclass Child(Client): pass\ndef run(client: Client):\n    return client.save()\n',
+        }, stub_paths=['stubs'])
+        project = next(f for f in repo['files'] if f['path'] == 'src/dependency.py')
+        client = next(s for s in project['symbols'] if s['name'] == 'Client')
+        main = next(f for f in repo['files'] if f['path'] == 'main.py')
+        self.assertEqual(main['classes'][0]['baseIds'], [client['id']])
+        parameter = next(s for s in main['symbols'] if s['name'] == 'client')
+        self.assertEqual(parameter['typeTargets'], [client['id']])
+
+
+class CythonTests(unittest.TestCase):
+    index = AnalyzerTests.index
+    def test_cython_symbols_types_calls_and_original_positions(self):
+        source = '''cdef class Counter:
+    cdef public double value
+    cpdef double add(self, double amount) except -1:
+        cdef int count = 2
+        self.value = amount
+        return helper(amount) + count
+cdef double helper(double amount) nogil:
+    return amount * 2
+'''
+        repo = self.index({'counter.pyx': source})
+        self.assertEqual(repo['diagnostics'], [])
+        file = repo['files'][0]
+        self.assertEqual(file['language'], 'cython')
+        symbols = {s['name']: s for s in file['symbols']}
+        self.assertEqual(symbols['value']['type'], 'double')
+        self.assertEqual(symbols['count']['type'], 'int')
+        self.assertEqual((symbols['add']['line'], symbols['add']['column'], symbols['add']['endLine']), (3, 17, 6))
+        self.assertEqual(symbols['amount']['type'], 'double')
+        call = next(r for r in file['references'] if r['role'] == 'call')
+        self.assertEqual(call['definition']['name'], 'helper')
+        self.assertEqual((call['line'], call['column']), (6, 15))
+        self.assertTrue(any(e['resolved'] for e in repo['callGraph']['edges']))
+
+    def test_cimports_stubs_includes_and_source_precedence(self):
+        repo = self.index({
+            'pkg/__init__.pyx': 'from .engine cimport step\n',
+            'pkg/engine.pxd': 'cpdef double step(double value)\n',
+            'pkg/engine.pyx': 'cpdef double step(double value):\n    return value\n',
+            'pkg/use.pyx': 'from .engine cimport step as advance\ncdef double run(double value):\n    return advance(value)\n',
+            'shared.pxi': 'cdef int limit = 3\n',
+        })
+        self.assertEqual(repo['diagnostics'], [])
+        self.assertEqual(len(repo['files']), 5)
+        use = next(f for f in repo['files'] if f['path'] == 'pkg/use.pyx')
+        call = next(r for r in use['references'] if r['role'] == 'call')
+        self.assertEqual(call['definition']['path'], 'pkg/engine.pyx')
+        stub = next(f for f in repo['files'] if f['path'].endswith('.pxd'))
+        self.assertEqual(stub['symbols'][0]['kind'], 'function')
+
+    def test_cython_memoryviews_casts_unicode_and_syntax_error(self):
+        source = 'def total(double[:] values):\n    label = "🌲"; result = <double>values[0]\n    return result\n'
+        repo = self.index({'a.pyx': source, 'bad.pyx': 'cdef double broken(:\n', 'valid.py': 'safe = 1\n'})
+        self.assertEqual(len(repo['files']), 3)
+        self.assertEqual(len(repo['diagnostics']), 1)
+        self.assertEqual(repo['diagnostics'][0]['path'], 'bad.pyx')
+        file = next(f for f in repo['files'] if f['path'] == 'a.pyx')
+        values = next(s for s in file['symbols'] if s['name'] == 'values')
+        self.assertEqual(values['type'], 'double[:]')
+        read = next(r for r in file['references'] if r['name'] == 'values' and r['line'] == 2)
+        self.assertEqual(read['column'], len(source.splitlines()[1].split('values')[0].encode('utf-16-le')) // 2)
+
+    def test_cython_imports_types_loops_and_never_evaluates_directives(self):
+        repo = self.index({'types.pyx': '''import math as m
+from math import sqrt as root
+cimport numpy as np
+ctypedef unsigned long index_t
+cdef struct Point:
+    double x
+cdef enum Color:
+    RED = 1
+    BLUE
+cdef extern from "missing.h":
+    double sqrt(double x) nogil
+include "missing.pxi"
+DEF dangerous = __import__("os").system("must never run")
+IF dangerous:
+    cdef int conditional
+def total(double[:] values, *, int count=1):
+    cdef double result = 0
+    for x in values:
+        result += x
+    label = "hello"
+    return result
+'''})
+        self.assertEqual(len(repo['diagnostics']), 3)
+        self.assertTrue(all(d['severity'] == 'warning' for d in repo['diagnostics']))
+        file = repo['files'][0]
+        symbols = {s['name']: s for s in file['symbols']}
+        self.assertEqual(symbols['index_t']['type'], 'unsigned long')
+        self.assertEqual(symbols['Point']['kind'], 'type')
+        self.assertEqual(symbols['Color']['kind'], 'type')
+        self.assertEqual(symbols['sqrt']['kind'], 'function')
+        self.assertEqual(symbols['label']['type'], 'str')
+        self.assertEqual(symbols['x']['scopeName'], 'total')
+        self.assertNotIn('conditional', symbols)
+        self.assertEqual(symbols['m']['type'], 'math')
+        self.assertEqual(symbols['np']['type'], 'numpy')
+        self.assertEqual(symbols['root']['type'], 'math.sqrt')
+
+    def test_cython_inheritance_typed_receivers_and_multiple_declarations(self):
+        repo = self.index({
+            'base.pyx': 'cdef class Base:\n    cpdef int save(self):\n        return 1\n',
+            'child.pyx': 'from base cimport Base\ncdef class Child(Base):\n    cdef int first = 1, second = 2\n    cdef double *pointer\n    cpdef int run(self):\n        return self.save()\n',
+            'api.pxd': 'cdef class Interface:\n    cpdef int run(self)\n',
+            'use.py': 'from child import Child\ndef use(value: Child):\n    return value.run()\n',
+        })
+        self.assertEqual(repo['diagnostics'], [])
+        child = next(f for f in repo['files'] if f['path'] == 'child.pyx')
+        symbols = {s['name']: s for s in child['symbols']}
+        self.assertEqual(symbols['first']['type'], 'int')
+        self.assertEqual(symbols['second']['type'], 'int')
+        self.assertEqual(symbols['pointer']['type'], 'double*')
+        self.assertIsNotNone(child['classes'][0]['baseIds'][0])
+        save = next(r for r in child['references'] if r['name'] == 'save')
+        self.assertEqual(save['definition']['path'], 'base.pyx')
+        use = next(f for f in repo['files'] if f['path'] == 'use.py')
+        run = next(r for r in use['references'] if r['name'] == 'run')
+        self.assertEqual(run['definition']['path'], 'child.pyx')
+        stub = next(f for f in repo['files'] if f['path'] == 'api.pxd')
+        self.assertEqual(stub['classes'][0]['methods'], ['run'])
+
+    def test_python_compatible_cython_keeps_python_scope_semantics(self):
+        source = 'def run(values):\n    result = [value for value in values]\n    return result\n'
+        python = self.index({'a.py': source})['files'][0]
+        cython = self.index({'a.pyx': source})['files'][0]
+        self.assertEqual([(s['name'], s['scopeName'], s['references']) for s in python['symbols']],
+                         [(s['name'], s['scopeName'], s['references']) for s in cython['symbols']])
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

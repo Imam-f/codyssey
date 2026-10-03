@@ -1,6 +1,7 @@
 """Conservative static call targets. No imports or execution of indexed code."""
 import ast
 from collections import defaultdict
+from stub_paths import index_priority
 
 
 class CallResolver:
@@ -15,13 +16,13 @@ class CallResolver:
         self.classes = {c['id']: c for f in files for c in f['classes']}
         self.assignments = defaultdict(list)
         self.aliases = defaultdict(list)
-        for f in files:
+        for f in sorted(files, key=index_priority, reverse=True):
             for s in f['symbols']:
                 self.bindings[s['scopeId']][s['name']] = s
                 if s['scopeName'] == '<module>':
-                    self.exports[f"{f['module']}.{s['name']}"] = s
+                    self.exports.setdefault(f"{f['module']}.{s['name']}", s)
                     if f['module'].startswith('src.'):
-                        self.exports[f"{f['module'][4:]}.{s['name']}"] = s
+                        self.exports.setdefault(f"{f['module'][4:]}.{s['name']}", s)
             for a in f['assignments']:
                 self.assignments[(a['scopeId'], a['target'])].append(a)
             for a in f['aliases']:
@@ -65,7 +66,7 @@ class CallResolver:
         if not name.startswith('.'): return name
         level = len(name) - len(name.lstrip('.'))
         parts = file['module'].split('.')
-        if not file['path'].endswith(('__init__.py', '__init__.pyi')): parts.pop()
+        if file['path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] != '__init__': parts.pop()
         return '.'.join(parts[:max(0, len(parts) - level + 1)] + [name.lstrip('.')])
 
     def imported(self, name, file, seen):

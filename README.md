@@ -4,7 +4,7 @@
 
 > A developer tool where you anger the gods and commit atrocities against humanity
 
-A compact Electron desktop app for inspecting Python repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer with a code minimap and folding, floating declaration windows, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph. Reopening a repository reuses a fingerprint-validated analysis cache for near-instant startup.
+A compact Electron desktop app for inspecting Python and Cython repositories. The interface is read-only: a repository overview with file metrics, a file explorer and outline, Tree-sitter source viewer with a code minimap and folding, floating declaration windows, function-level usage table, symbol inspector, class inheritance graph, class member tracker, and call graph. Reopening a repository reuses a fingerprint-validated analysis cache for near-instant startup.
 
 ## Download
 
@@ -16,7 +16,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and ensure
 
 ### Welcome page
 
-Open a Python repository, return to a recent project, or explore the bundled sample.
+Open a Python or Cython repository, return to a recent project, or explore the bundled sample.
 
 ![Codyssey welcome page with repository-opening actions and a recent repositories section](docs/screenshots/welcome.png)
 
@@ -28,7 +28,7 @@ See lines of code and top-level symbol counts per file, with sortable columns an
 
 ### Source explorer
 
-Browse highlighted Python source alongside symbol details, types, and references. A code minimap beside the editor overviews the whole file and jumps to any line.
+Browse highlighted Python and Cython source alongside symbol details, types, and references. A code minimap beside the editor overviews the whole file and jumps to any line.
 
 ![Codyssey source explorer showing the sample repository, a selected symbol, and its references](docs/screenshots/source.png)
 
@@ -46,7 +46,7 @@ Trace callers and callees around a selected function, then navigate to definitio
 
 ## Run
 
-Requires Node.js 22.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) on PATH. `uv` selects or installs Python 3.12+ for the analyzer; no Python packages are required.
+Requires Node.js 22.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) on PATH. `uv` selects or installs Python 3.12+ and installs the pinned Cython parser automatically.
 
 ```sh
 npm install
@@ -62,8 +62,11 @@ npm run build     # Build the renderer and bundled browser example
 npm start         # Run the production Electron app
 npm test          # Python semantic analysis tests, through uv
 npm run test:ui   # Integration tests against the production Electron app
+npm run test:marks # Mark navigation, notes, repository isolation, and persistence
 npm run test:popout  # Pop-window, live-update, highlighting, folding, and sizing tests
 npm run test:definitions  # Cross-file definition navigation tests
+npm run test:cython       # Cython highlighting, navigation, popups, and cache tests
+npm run test:stubs        # External stub settings, venv discovery, navigation, and cache tests
 npm run test:welcome      # Welcome, persistent recents, and VS Code integration tests
 npm run pack      # Unpacked desktop application under release/
 npm run dist      # Windows x64 portable executable under release/
@@ -72,6 +75,12 @@ npm run dist      # Windows x64 portable executable under release/
 The packaged application also requires `uv` on PATH. All highlighting assets are bundled locally. `npm run dev:web` provides a browser preview with an explicit sample action after `npm run sample`; local folders, persistent recent repositories, and VS Code integration require Electron.
 
 ## Navigation
+
+- **Marks** save source locations for later in the right sidebar, including Free canvas. Click the red-dot gutter beside a source line or a canvas code line, press **F9**, or use the dot button in the sidebar's **Marks** section to toggle the current line. Clicking a canvas code line sets the current source location without leaving the canvas. Marks are grouped by file with source previews; click one to jump back to source, use its pencil to add a note, or its × to remove it. **F2** / **Shift+F2** and the sidebar arrows cycle through marks across files. Marked files and the minimap also show red dots. Marks and notes save locally per repository across restarts. Locations use fixed line numbers; after reindexing, missing files or lines remain listed as unavailable until removed.
+
+- **Free canvas** lets you pin whole classes, functions, or a custom source line range, then arrange them with boxes, lines, arrows, bend arrows, text, and frames. Use **Add code** on the canvas, or the single **Add to canvas** action in the source breadcrumb. Highlight source text, or click a line number and Shift+click another, to add that line range; without a selection, the action adds the enclosing declaration or current line. Code blocks follow saved file edits in the desktop app, including changes above the block; syntax errors retain the last valid code. Removed or renamed declarations and deleted ranges keep their last version with a status message.
+- Drag a canvas tool to draw, drag elements to move, and use the bottom-right selection handle to resize. Click a line or arrow's stroke to select it; empty space inside its bounding box remains part of the canvas. Selected lines and arrows have draggable endpoint handles. Bend arrows start straight; drag their middle point to create a smooth curve. Shift+click or drag a selection rectangle to select several elements. The rectangle selects only fully enclosed elements; grouped elements require the entire group to be enclosed. Drag anywhere within a multi-selection's bounding box, including the gaps between elements, to move it. **Ctrl+G** groups and **Ctrl+Shift+G** ungroups. **Frame selection** wraps selected elements, and dragging a frame's title moves its contents. The properties panel edits colors, thickness, text, and dimensions. Scroll or Alt+drag to pan, use the zoom buttons to zoom, and **Ctrl+Z** / **Ctrl+Shift+Z** to undo/redo. Canvas layouts save locally per repository and restore when it reopens. Code remains read-only; edit the original file in your editor. Browser previews show indexed sample code rather than watching local files.
+- `npm run test:canvas` checks line tracking, declaration snapshots, and the production desktop canvas, including drawing, groups, frames, styles, resize, undo/redo, and persistence.
 
 - **Open in VS Code** (the toolbar's **VS Code** button) opens the current repository in a new Visual Studio Code window using its `vscode://` handler, preserving workspaces already open in other windows. Visual Studio Code must be installed with that handler enabled.
 - **Overview** lists every indexed file with its line count and top-level symbol counts, with sortable columns and file filtering. Click a row to open that file.
@@ -82,7 +91,7 @@ The packaged application also requires `uv` on PATH. All highlighting assets are
 - **Aliases** shows import aliases and assignment chains, their scopes, source lines, and reassignment boundaries. Target links navigate to indexed symbols.
 - **Inheritance** shows repository classes, multiple inheritance, and unresolved external bases. Search narrows to a class and its ancestors/descendants. Click a class to open its declaration, or use its crosshair to focus the hierarchy. Zoom and scroll to explore large graphs.
 - **Class tracker** lists every repository class and, for the selected class, its bases and metrics, with methods and properties grouped by whether they are added, overridden, inherited, or dynamically assigned. Instance properties first assigned by methods other than `__init__` are flagged as dynamic. Search by class or member name; each member links to its declaration.
-- **Pop declaration** opens a borderless, draggable, always-on-top window for a class or function. Use the pop button in the source gutter or breadcrumb, Class tracker, Call graph, or inspector. Hover or focus the info button beside Close to see the declaration name and file. The window highlights Python syntax, lets you fold blocks, and shrinks to fit short declarations. Long code scrolls within the window. It watches its Python file and follows the declaration when edits shift its line or change its body. While the file has a syntax error, it keeps the last valid version visible.
+- **Pop declaration** opens a borderless, draggable, always-on-top window for a class or function. Use the pop button in the source gutter or breadcrumb, Class tracker, Call graph, or inspector. Hover or focus the info button beside Close to see the declaration name and file. The window highlights Python syntax, lets you fold blocks, and shrinks to fit short declarations. Long code scrolls within the window. It watches its source file and follows the declaration when edits shift its line or change its body. While the file has a syntax error, it keeps the last valid version visible.
 - **Call graph** shows the selected function between its direct **Called by** and **Calls** neighbors. Search functions, follow a node to refocus, filter either direction, hide unresolved targets, or filter connections by name. Definition buttons open source; line-number buttons open the exact call site. Repeated calls share an edge with separate call-site links, and recursion is marked explicitly. Expand the graph to fullscreen, hide the function list for a wider canvas, and hover a node or edge to highlight its connections. The inspector also lists calls and callers for the selected function or the function containing the selected variable.
 - The **code minimap** beside the source shows a syntax-colored overview of the whole file: highlights the current line, the visible viewport, the selected symbol's lines, and diagnostics. Click or drag to jump to a line; the minimap also supports keyboard navigation (arrow keys, Page Up/Down, Home/End).
 - **Ctrl+P** searches files, classes, functions, and type aliases. **Ctrl+F** filters the variable/symbol table by name or type.
@@ -90,16 +99,16 @@ The packaged application also requires `uv` on PATH. All highlighting assets are
 
 ## Analysis
 
-The analyzer is `backend/analyzer.py`, a dependency-free Python AST indexer run through `uv run --no-project --script`. It never imports or executes the analyzed repository. Analysis is a four-stage pipeline, one stage per backend module:
+The analyzer is `backend/analyzer.py`, a Python AST indexer with a Cython syntax-tree adapter run through `uv run --no-project --script`. It never imports or executes the analyzed repository. Analysis is a four-stage pipeline, one stage per backend module:
 
-1. **Index** (`analyzer.py`) — parse every file with `ast` and record symbols, references, aliases, classes, and scopes.
+1. **Index** (`analyzer.py`) — parse Python files with `ast` and Cython files with the pinned Cython parser and record symbols, references, aliases, classes, and scopes.
 2. **Link** (`definitions.py`) — resolve identifiers to indexed definitions across files, imports, re-exports, and inheritance.
 3. **Class tracking** (`class_tracker.py`) — classify each class's methods and properties as added, overridden, inherited, or dynamic.
 4. **Call graph** (`callgraph.py`) — resolve explicit call sites into a static caller/callee graph.
 
 ### Indexing model
 
-For each `.py`/`.pyi` file the indexer produces:
+For each `.py`/`.pyi`/`.pyx`/`.pxd`/`.pxi` file the indexer produces:
 
 - `symbols` — declared names, each with `kind`, `scopeId`, `scopeName`, `type`, `typeSource`, `path`, `line`/`column`, and a resolved `references` count.
 - `references` — every name and attribute occurrence with a `role`, a source location, an optional `expression` (attribute receivers), and a resolved `symbolId` / `definition`.
@@ -107,6 +116,32 @@ For each `.py`/`.pyi` file the indexer produces:
 - `classes` — class symbols plus `bases`, resolved `baseIds`, a `methods` list, and a `memberTracker` grouping added, overridden, inherited, and dynamic members.
 - `scopes` — module/class/function/comprehension scopes with their `globals` and `nonlocals` sets.
 - `imports`, `calls`, `assignments` — raw facts consumed by the linking and call-graph stages.
+
+### Cython
+
+Cython files (`.pyx`, `.pxd`, and `.pxi`) participate in the file explorer, overview, symbol inspector, source navigation, class tracker, call graph, and live declaration popups. Highlighting combines the bundled Python Tree-sitter grammar with Cython keywords and C types.
+
+The analyzer uses Cython 3.2.4 only to parse syntax, then adapts declarations and expressions to the existing indexer. `uv` installs this pinned dependency automatically. Typed `def`, `cdef`, and `cpdef` functions, extension classes, C variables, memoryview annotations, casts, `ctypedef`, structs, enums, and external function declarations are indexed. Python imports and `cimport` aliases resolve across indexed modules; `.pyx` implementations take precedence over matching `.pxd` declarations.
+
+No compilation, repository imports, or inspected expressions are executed. Includes are not expanded: `.pxi` files are indexed separately, without inheriting the including module's scope. Compile-time `DEF`/`IF` directives are not evaluated, and conditional declarations are skipped with diagnostics. In files using Cython-specific syntax, properties, C-style range loops, comprehensions, lambdas, exception bindings, and context-manager bindings have partial analysis and emit warnings. Python-compatible Cython files retain the full Python indexing behavior. C/C++ dispatch and external header contents remain unresolved.
+
+### External dependency stubs
+
+Open a repository and click **Stubs** in the toolbar. Enable **Use stubs from this repository’s .venv, venv, or env**, add another stub folder or virtual environment, then choose **Apply and reindex**. Settings persist per repository across restarts. Remove the folders and turn off the checkbox to disable external stub lookup.
+
+The analyzer reads only `.pyi` and `.pxd` files from these optional locations. It discovers Windows `Lib/site-packages` and Unix `lib/python*/site-packages` layouts without activating or executing the environment. You can also select `site-packages` directly, a package stub folder, an import root containing several packages, or a typeshed checkout. Stub-only `package-stubs` directories resolve as `package`; typeshed's `stdlib` and individual distribution roots are recognized.
+
+External files appear under **@stubs** in the explorer and carry a **Dependency stub** status label. Imports, re-exports, type links, methods, class relationships, and calls can resolve to these declarations, including declaration popups and canvas navigation. Repository definitions take precedence over external stubs; the first additional folder takes precedence among external folders. This provides static declaration navigation, not dependency installation or full type checking. Dependencies providing only inline annotations in `.py` files are not indexed through this option.
+
+Reopening and F5 account for stub settings and changes to external stub files. Missing folders produce warnings while the repository remains available. External files share the existing 2 MB per-file and 5,000-file limits, with project files indexed first.
+
+The standalone analyzer accepts the same options:
+
+```sh
+uv run --no-project --script backend/analyzer.py /path/to/repository --use-venv --stub-path /path/to/stubs
+```
+
+Repeat `--stub-path` to add more folders; relative paths are resolved from the repository.
 
 ### Symbol kinds
 
@@ -205,11 +240,11 @@ Resolution is conservative and not path-sensitive or interprocedural: callbacks,
 ### Diagnostics and limits
 
 - Syntax errors are reported per file (path, line, message) without stopping the scan.
-- Symbolic links and files over 2 MB are skipped; the index is capped at 5,000 Python files and the desktop response at 100 MB.
+- Symbolic links and files over 2 MB are skipped; the index is capped at 5,000 source files and the desktop response at 100 MB.
 - Common environment, dependency, cache, and build directories are excluded (`.git`, `.venv`, `venv`, `env`, `__pycache__`, `node_modules`, `dist`, `build`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `site-packages`).
 - Python source encodings are respected via `tokenize.open`.
 - Reindexing is manual (`F5`); repositories are not watched automatically.
-- Analysis results are cached per repository under the user-data directory. Reopening a repository skips analysis when its file fingerprint (paths, sizes, and modification times of indexed Python files) is unchanged; `F5` always reanalyzes. The cache is versioned against the app version and invalidated automatically on mismatch.
+- Analysis results are cached per repository under the user-data directory. Reopening a repository skips analysis when its file fingerprint (paths, sizes, and modification times of indexed Python and Cython files) is unchanged; `F5` always reanalyzes. The cache is versioned against the app version and invalidated automatically on mismatch.
 
 ### What it does not do
 
@@ -217,7 +252,9 @@ This is a static browser, not a Python type checker or interpreter. It does not 
 
 ## Structure
 
-- `backend/analyzer.py` — dependency-free Python AST indexer, invoked only through `uv run --no-project --script`.
+- `backend/analyzer.py` — Python AST indexer with a Cython syntax-tree adapter, invoked only through `uv run --no-project --script`.
+- `backend/cython_parser.py` — pinned Cython parser adapter preserving original source locations.
+- `backend/stub_paths.py` — optional external stub and virtual-environment import roots.
 - `backend/callgraph.py` — static call resolution and graph nodes, edges, and individual call sites.
 - `backend/definitions.py` — cross-file source definition links, including relative imports, package re-exports, and `src/` layouts.
 - `backend/class_tracker.py` — per-class member classification (added, overridden, inherited, dynamic).

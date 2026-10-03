@@ -4,6 +4,7 @@ import DeclarationPopup from "./DeclarationPopup";
 import "./styles.css";
 import "./styles2.css";
 import "./calls.css";
+import "./marks.css";
 
 createRoot(document.getElementById("root")).render(
   new URLSearchParams(window.location.search).has("popout") ? <DeclarationPopup /> : <App />,

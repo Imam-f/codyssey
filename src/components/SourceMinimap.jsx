@@ -22,6 +22,7 @@ export default function SourceMinimap({
   referencesByLine,
   activeScope,
   diagnostics,
+  marks,
 }) {
   const rootRef = useRef(null);
   const canvasRef = useRef(null);
@@ -127,11 +128,20 @@ export default function SourceMinimap({
     ctx.fillRect(0, currentY - 1, width, 2);
     ctx.fillStyle = "#d5eee2";
     ctx.fillRect(width - 7, currentY - 2, 7, 4);
+
+    ctx.fillStyle = "#e4777c";
+    for (const mark of marks) {
+      if (!mark.available) continue;
+      ctx.beginPath();
+      ctx.arc(5, yForLine(mark.line), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }, [
     activeScope,
     diagnostics,
     file,
     line,
+    marks,
     lines,
     path,
     referencesByLine,

@@ -34,7 +34,7 @@ export default function Welcome({
             <span>Find your way through.</span>
           </h1>
           <p>
-            Explore Python repositories, follow definitions, and see how
+            Explore Python and Cython repositories, follow definitions, and see how
             everything connects.
           </p>
         </header>
@@ -46,7 +46,7 @@ export default function Welcome({
               <FolderOpen size={20} />
               <span>
                 <strong>Open repository</strong>
-                <small>Choose a local Python project</small>
+                <small>Choose a local Python or Cython project</small>
               </span>
               <kbd>Ctrl O</kbd>
             </button>
@@ -137,7 +137,7 @@ export default function Welcome({
         </section>
         <footer className="welcome-footer">
           <span>Codyssey <b>v{appVersion}</b></span>
-          <span>Python, in perspective.</span>
+          <span>Python and Cython, in perspective.</span>
         </footer>
       </div>
     </main>

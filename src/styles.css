@@ -467,7 +467,7 @@ i {
 }
 .file-tab.active {
   background: #1d2228;
-  border-top: 1px solid #8dafa1;
+  box-shadow: inset 0 -2px 0 var(--accent);
   color: #d7dde5;
 }
 .file-tab > button:first-child {
@@ -588,11 +588,13 @@ i {
   border-left: 2px solid transparent;
   padding-right: 30px;
 }
+.declaration-slot {
+  display: flex;
+  align-items: center;
+  width: 18px;
+  flex-shrink: 0;
+}
 .declaration-pop {
-  position: absolute;
-  z-index: 1;
-  left: 58px;
-  top: 2px;
   display: grid;
   place-items: center;
   width: 18px;
@@ -608,10 +610,10 @@ i {
   border-left-color: #87aa99;
 }
 .line-number {
-  width: 58px;
+  width: 40px;
   flex-shrink: 0;
   justify-content: flex-end;
-  padding: 0 17px 0 6px;
+  padding: 0 8px 0 4px;
   color: #4f5a68;
   font-family: var(--mono);
   font-size: 10px;
@@ -621,6 +623,7 @@ i {
 .current-line .line-number {
   color: #b2c0bd;
 }
+.canvas-selected-line { background: #89b4a21a; border-left-color: var(--accent); }
 .source-area .fold-toggle {
   width: 16px;
   flex-shrink: 0;

@@ -1,0 +1,88 @@
+:root { --mark: #e4777c; }
+.mark-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--mark);
+}
+.tree-file .tree-mark { width: 6px; height: 6px; margin-left: 1px; }
+.source-area .mark-toggle {
+  width: 18px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 0;
+  justify-content: center;
+}
+.mark-toggle .mark-dot, .mark-current:not(.is-marked) .mark-dot {
+  background: transparent;
+  border: 1px solid var(--mark);
+  opacity: 0;
+}
+.code-line:hover .mark-toggle .mark-dot,
+.mark-toggle:focus-visible .mark-dot,
+.mark-current:not(.is-marked) .mark-dot { opacity: .5; }
+.mark-toggle.is-marked .mark-dot { background: var(--mark); border: 0; opacity: 1; }
+.marked-line:not(.current-line) { background: #e4777c06; }
+.sidebar .outline { min-height: 55px; }
+.right-sidebar { display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+.right-sidebar > .inspector { flex: 1; min-height: 0; border-left: 0; }
+.right-sidebar > .marks-section { margin-top: auto; }
+.canvas-mark-toggle { width: 18px; padding: 0; flex-shrink: 0; justify-content: center; }
+.canvas-mark-toggle .mark-dot { background: transparent; border: 1px solid var(--mark); opacity: 0; }
+.canvas-code-line:hover .canvas-mark-toggle .mark-dot, .canvas-mark-toggle:focus-visible .mark-dot { opacity: .5; }
+.canvas-mark-toggle.is-marked .mark-dot { background: var(--mark); border: 0; opacity: 1; }
+.marks-section {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  max-height: 36%;
+  min-height: 37px;
+  border-top: 1px solid var(--line);
+}
+.marks-heading { height: 37px; padding: 0 6px; gap: 2px; }
+.marks-disclosure { padding: 4px 0; gap: 5px; font-size: 10px; letter-spacing: 1px; }
+.marks-count {
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #e4777c15;
+  color: var(--mark);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+.marks-actions { display: flex; gap: 1px; }
+.marks-actions button { padding: 4px; width: 20px; height: 23px; justify-content: center; }
+.marks-list { overflow: auto; min-height: 0; padding-bottom: 8px; }
+.marks-empty { margin: 3px 15px 7px; color: #a8b0bd; font-size: 11px; line-height: 1.9; }
+.marks-empty span { color: var(--muted); font-size: 10px; }
+.marks-empty kbd { font-size: 9px; }
+.marks-file {
+  display: flex;
+  gap: 8px;
+  padding: 5px 15px 3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.marks-file > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.marks-file small { margin-left: auto; font-size: 9px; }
+.mark-row.active { background: #e4777c0c; box-shadow: inset 2px 0 var(--mark); }
+.mark-row-main { display: flex; align-items: center; padding-right: 7px; }
+.mark-location {
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  border-radius: 0;
+  padding: 6px 5px 6px 15px;
+  text-align: left;
+  font-size: 10px;
+}
+.mark-line { min-width: 16px; color: var(--mark); font-family: var(--mono); font-size: 9px; }
+.mark-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.mark-edit, .mark-remove { width: 20px; height: 22px; padding: 3px; justify-content: center; color: var(--muted); }
+.mark-edit:hover, .mark-remove:hover { color: var(--mark); }
+.mark-unavailable { display: block; padding: 0 15px 5px 30px; color: var(--muted); font-size: 9px; }
+.mark-note { display: flex; align-items: center; gap: 2px; margin: 2px 10px 7px 15px; }
+.mark-note input { flex: 1; width: 0; padding: 5px; border: 1px solid var(--line); background: var(--bg); border-radius: 3px; font-size: 10px; }
+.mark-note button { padding: 4px; font-size: 10px; }

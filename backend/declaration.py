@@ -1,12 +1,14 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = ["Cython==3.2.4"]
 # ///
 """Read one Python declaration without importing the inspected file."""
 import ast
 import json
 import sys
 from pathlib import Path
+import tokenize
+from cython_parser import parse_source
 
 
 def declarations(tree):
@@ -29,9 +31,10 @@ def declarations(tree):
 def main():
     path = Path(sys.argv[1])
     target = json.loads(sys.argv[2])
-    source = path.read_text(encoding='utf-8-sig')
+    with tokenize.open(path) as handle:
+        source = handle.read()
     try:
-        tree = ast.parse(source, filename=str(path))
+        tree, _ = parse_source(source, str(path))
     except SyntaxError as error:
         return {'status': 'invalid', 'message': f'Syntax error on line {error.lineno}; showing the last valid version.'}
     chain = [(item['kind'], item['name']) for item in target['chain']]
