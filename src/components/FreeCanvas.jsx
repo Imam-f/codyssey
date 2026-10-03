@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MousePointer2, Hand, Square, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
+import { MousePointer2, Hand, Square, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, BringToFront, SendToBack, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
 import { api, isDesktop } from '../util';
 import { initHighlighter } from '../highlight';
 import { applySnapshot, bounds, codeItem, connectorPath, connectorPoints, emptyCanvas, isConnector, reflectConnector, reshapeConnector, uid } from '../canvas-model';
@@ -7,6 +7,12 @@ import '../free-canvas.css';
 
 const tools = [['select', MousePointer2, 'Select'], ['hand', Hand, 'Pan'], ['box', Square, 'Box'], ['line', Minus, 'Line'], ['arrow', ArrowUpRight, 'Arrow'], ['bend', CornerDownRight, 'Bend arrow'], ['text', Type, 'Text'], ['frame', Frame, 'Frame']];
 const colors = ['#89b4a2', '#b4a4df', '#79b8e8', '#e9b872', '#e88a94', '#c5cbd3'];
+const fonts = {
+  sans: { label: 'Sans · Arial', family: 'Arial, Helvetica, sans-serif' },
+  rounded: { label: 'Rounded · Trebuchet', family: '"Trebuchet MS", Arial, sans-serif' },
+  serif: { label: 'Serif · Georgia', family: 'Georgia, "Times New Roman", serif' },
+  mono: { label: 'Mono · Cascadia', family: '"Cascadia Code", Consolas, monospace' },
+};
 const storageKey = (repo) => `codyssey:canvas:v1:${repo.root}`;
 function readCanvas(repo) {
   try {
@@ -42,7 +48,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   const docRef = useRef(doc); docRef.current = doc;
   const [selection, setSelection] = useState([]);
   const [tool, setTool] = useState('select');
-  const [style, setStyle] = useState({ color: colors[0], thickness: 2 });
+  const [style, setStyle] = useState({ color: colors[0], thickness: 2, fontFamily: 'sans', fontWeight: 400 });
   const [picker, setPicker] = useState(false);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('function');
@@ -184,7 +190,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     }
     checkpoint();
     const itemToAdd = { id: uid(), type: tool, ...p, w: 1, h: 1, ...style, text: tool === 'frame' ? 'Frame' : tool === 'text' ? 'Text' : '', bend: 0.5 };
-    setDoc((previous) => ({ ...previous, items: [...previous.items, itemToAdd] }));
+    setDoc((previous) => ({ ...previous, items: tool === 'frame' ? [itemToAdd, ...previous.items] : [...previous.items, itemToAdd] }));
     setSelection([itemToAdd.id]); gesture.current = { type: 'draw', p, id: itemToAdd.id };
   }
   function beginSelection(event) {
@@ -240,6 +246,17 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     checkpoint(); setDoc((previous) => ({ ...previous, items: previous.items.filter((item) => !selection.includes(item.id)) })); setSelection([]);
   }
   function group() { if (selected.length > 1) changeSelected({ group: uid() }); }
+  function changeLayer(front) {
+    if (!selection.length) return;
+    const ids = new Set(expanded(selection));
+    const items = docRef.current.items;
+    const moving = items.filter((item) => ids.has(item.id));
+    const remaining = items.filter((item) => !ids.has(item.id));
+    const reordered = front ? [...remaining, ...moving] : [...moving, ...remaining];
+    if (reordered.every((item, index) => item === items[index])) return;
+    checkpoint();
+    setDoc((previous) => ({ ...previous, items: reordered }));
+  }
   function frameSelection() {
     if (!selectedBounds) { setTool('frame'); return; }
     checkpoint(); const box = selectedBounds;
@@ -271,6 +288,8 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
         if (key === 'y') { event.preventDefault(); undo(true); }
         if (key === 'g') { event.preventDefault(); event.shiftKey ? changeSelected({ group: null }) : group(); }
         if (key === 'a') { event.preventDefault(); setSelection(doc.items.map((item) => item.id)); }
+        if (event.code === 'BracketRight' && event.shiftKey) { event.preventDefault(); changeLayer(true); }
+        if (event.code === 'BracketLeft' && event.shiftKey) { event.preventDefault(); changeLayer(false); }
       }
     };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
@@ -288,6 +307,8 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
       <button aria-label="Group selection" title="Group · Ctrl+G" disabled={selected.length < 2} onClick={group}><Group size={15} /></button>
       <button aria-label="Ungroup selection" disabled={!selected.some((item) => item.group)} onClick={() => changeSelected({ group: null })}><Ungroup size={15} /></button>
       <button aria-label="Frame selection" title="Frame selection" onClick={frameSelection}><Frame size={15} /><Plus size={10} /></button>
+      <button aria-label="Bring to front" title="Bring to front · Ctrl+Shift+]" disabled={!selected.length} onClick={() => changeLayer(true)}><BringToFront size={15} /></button>
+      <button aria-label="Send to back" title="Send to back · Ctrl+Shift+[" disabled={!selected.length} onClick={() => changeLayer(false)}><SendToBack size={15} /></button>
       <button aria-label="Delete selection" disabled={!selection.length} onClick={remove}><Trash2 size={15} /></button>
       <span className="canvas-divider" />
       <button aria-label="Undo canvas change" disabled={!history.current.past.length} onClick={() => undo()}><Undo2 size={15} /></button>
@@ -298,7 +319,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
         onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}
         onWheel={(event) => { if (event.ctrlKey || event.metaKey) zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1); else setDoc((previous) => ({ ...previous, viewport: { ...previous.viewport, x: previous.viewport.x - event.deltaX, y: previous.viewport.y - event.deltaY } })); }}>
         <div className="canvas-world" style={{ transform: `translate(${doc.viewport.x}px, ${doc.viewport.y}px) scale(${doc.viewport.zoom})` }}>
-          {[...doc.items.filter((item) => item.type === 'frame'), ...doc.items.filter((item) => item.type !== 'frame')].map((item) => {
+          {doc.items.map((item) => {
             const connector = isConnector(item);
             const path = connector ? connectorPath(item) : null;
             return <div key={item.id} data-canvas-id={item.id} data-type={item.type} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''}`}
@@ -310,7 +331,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
               </svg> : item.type === 'code' ? <>
                 <div className="canvas-code-header"><Code2 size={13} /><strong>{item.title}</strong><span className={`canvas-live ${item.status !== 'found' ? 'stale' : ''}`}>{item.status === 'found' ? isDesktop ? 'Live' : 'Indexed' : item.status}</span><button aria-label={`Open source for ${item.title}`} onClick={() => onNavigate({ path: item.target.path, line: item.target.line })}><ExternalLink size={12} /></button></div>
                 <div className="canvas-code-location">{item.target.path}:{item.target.line}–{item.target.endLine}</div><CodeContent item={item} marks={marks} onToggleMark={onToggleMark} onSourceLocation={onSourceLocation} />
-              </> : item.type === 'frame' ? <span className="canvas-frame-title">{item.text || 'Frame'}</span> : <div className="canvas-item-text" style={{ fontSize: item.fontSize || 18, fontWeight: item.type === 'text' ? Math.min(900, 400 + (item.thickness - 1) * 50) : undefined }}>{item.text}</div>}
+              </> : item.type === 'frame' ? <span className="canvas-frame-title">{item.text || 'Frame'}</span> : <div className="canvas-item-text" style={{ fontSize: item.fontSize || 18, fontFamily: (fonts[item.fontFamily] || fonts.sans).family, fontWeight: item.fontWeight || 400 }}>{item.text}</div>}
             </div>;
           })}
           {selectedBounds && !(single && isConnector(single)) && <div className={`canvas-selection ${selected.length > 1 ? 'canvas-selection-multiple' : ''}`} style={{ left: selectedBounds.x - 4, top: selectedBounds.y - 4, width: selectedBounds.w + 8, height: selectedBounds.h + 8 }} onPointerDown={selected.length > 1 ? beginSelection : undefined}><button className="canvas-resize" aria-label="Resize selection" onPointerDown={(event) => begin(event, null, true)} /></div>}
@@ -338,11 +359,15 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
         <h3>{selected.length ? `${selected.length} selected` : 'Drawing style'}</h3>
         <label>Color<input type="color" aria-label="Canvas color" value={single?.color || style.color} onChange={(event) => { setStyle((value) => ({ ...value, color: event.target.value })); if (selected.length) changeSelected({ color: event.target.value }); }} /></label>
         <div className="canvas-swatches">{colors.map((color) => <button key={color} aria-label={`Use color ${color}`} style={{ background: color }} onClick={() => { setStyle((value) => ({ ...value, color })); if (selected.length) changeSelected({ color }); }} />)}</div>
-        <label>Thickness<input type="number" min="1" max="16" aria-label="Canvas thickness" value={single?.thickness || style.thickness} onChange={(event) => { const thickness = Math.min(16, Math.max(1, Number(event.target.value))); setStyle((value) => ({ ...value, thickness })); if (selected.length) changeSelected({ thickness }); }} /></label>
+        {single?.type !== 'text' && <label>Thickness<input type="number" min="1" max="16" aria-label="Canvas thickness" value={single?.thickness || style.thickness} onChange={(event) => { const thickness = Math.min(16, Math.max(1, Number(event.target.value))); setStyle((value) => ({ ...value, thickness })); if (selected.length) changeSelected({ thickness }); }} /></label>}
         {single && <>
           <div className="canvas-property-grid">{['x', 'y', 'w', 'h'].map((key) => <label key={key}>{({ x: 'X', y: 'Y', w: 'Width', h: 'Height' })[key]}<input aria-label={`Canvas ${key}`} type="number" value={Math.round(single[key])} onChange={(event) => changeSelected({ [key]: key === 'w' || key === 'h' ? Math.max(1, Number(event.target.value)) : Number(event.target.value) })} /></label>)}</div>
           {single.type !== 'code' && !isConnector(single) && <label className="canvas-text-property">{single.type === 'frame' ? 'Frame name' : 'Text'}<textarea aria-label="Canvas text" value={single.text || ''} onChange={(event) => changeSelected({ text: event.target.value })} /></label>}
-          {['text', 'box'].includes(single.type) && <label>Font size<input type="number" min="8" max="120" aria-label="Canvas font size" value={single.fontSize || 18} onChange={(event) => changeSelected({ fontSize: Math.min(120, Math.max(8, Number(event.target.value))) })} /></label>}
+          {['text', 'box'].includes(single.type) && <>
+            <label>Font<select aria-label="Canvas font" value={fonts[single.fontFamily] ? single.fontFamily : 'sans'} onChange={(event) => { const fontFamily = event.target.value; setStyle((value) => ({ ...value, fontFamily })); changeSelected({ fontFamily }); }}>{Object.entries(fonts).map(([key, font]) => <option key={key} value={key}>{font.label}</option>)}</select></label>
+            <label>Weight<select aria-label="Canvas font weight" value={single.fontWeight || 400} onChange={(event) => { const fontWeight = Number(event.target.value); setStyle((value) => ({ ...value, fontWeight })); changeSelected({ fontWeight }); }}><option value="400">Regular</option><option value="500">Medium</option><option value="700">Bold</option></select></label>
+            <label>Font size<input type="number" min="8" max="120" aria-label="Canvas font size" value={single.fontSize || 18} onChange={(event) => changeSelected({ fontSize: Math.min(120, Math.max(8, Number(event.target.value))) })} /></label>
+          </>}
           {isConnector(single) && <><button onClick={() => changeSelected(reflectConnector(single, 'x'))}>Reverse horizontal</button><button onClick={() => changeSelected(reflectConnector(single, 'y'))}>Reverse vertical</button><p className="canvas-property-note">Drag either endpoint to move it.{single.type === 'bend' && ' Drag the middle point to curve the arrow.'}</p></>}
           {single.type === 'code' && <p className="canvas-property-note">{isDesktop ? 'Follows saved edits to the source file. Edit code in your editor.' : 'Sample code updates when you refresh the index. Live file tracking is available in the desktop app.'}</p>}
         </>}

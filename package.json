@@ -15,7 +15,7 @@
     "test": "uv run --script test/test_analyzer.py",
     "test:ui": "node test/smoke.mjs",
     "test:marks": "npm run build && node test/marks-smoke.mjs",
-    "test:canvas": "node test/canvas-model.mjs && uv run --script test/test_canvas.py && npm run build && node test/canvas-smoke.mjs && node test/canvas-interactions.mjs && node test/canvas-selection-smoke.mjs",
+    "test:canvas": "node test/canvas-model.mjs && uv run --script test/test_canvas.py && npm run build && node test/canvas-smoke.mjs && node test/canvas-interactions.mjs && node test/canvas-selection-smoke.mjs && node test/canvas-layers-smoke.mjs",
     "test:popout": "npm run build && node test/popout-smoke.mjs",
     "test:call-graph": "node test/call-graph-smoke.mjs",
     "test:definitions": "node test/definitions-smoke.mjs",
