@@ -48,6 +48,13 @@ try {
   const rect = await canvas.boundingBox();
   async function draw(name, x, y, dx, dy) {
     await page.getByRole('button', { name, exact: true }).click();
+    if (/arrow/i.test(name)) {
+      // Arrows are placed with two clicks: the start point, then the end point.
+      await page.mouse.click(rect.x + x, rect.y + y);
+      await page.mouse.move(rect.x + x + dx, rect.y + y + dy, { steps: 5 });
+      await page.mouse.click(rect.x + x + dx, rect.y + y + dy);
+      return;
+    }
     await page.mouse.move(rect.x + x, rect.y + y); await page.mouse.down();
     await page.mouse.move(rect.x + x + dx, rect.y + y + dy, { steps: 5 }); await page.mouse.up();
   }

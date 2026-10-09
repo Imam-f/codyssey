@@ -42,7 +42,60 @@ export function reshapeConnector(item, points, curved = Boolean(item.bendPoint))
 export function reflectConnector(item, axis) {
   const points = connectorPoints(item);
   for (const point of Object.values(points)) point[axis] = axis === 'x' ? 2 * item.x + item.w - point.x : 2 * item.y + item.h - point.y;
-  return reshapeConnector(item, points);
+  // Mirroring moves the ends away from their blocks, so they are no longer snapped.
+  return { ...reshapeConnector(item, points), startSnap: undefined, endSnap: undefined };
+}
+// Arrow ends can snap to the eight anchors around a box, text, or code block.
+export const snapAnchors = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
+export const canSnap = (item) => ['arrow', 'bend'].includes(item.type);
+export const isSnapTarget = (item) => !isConnector(item) && item.type !== 'frame';
+// Distance from a point to the nearest edge or inside of an item's box (0 when inside).
+export function distanceToBox(item, point) {
+  const dx = Math.max(item.x - point.x, 0, point.x - (item.x + item.w));
+  const dy = Math.max(item.y - point.y, 0, point.y - (item.y + item.h));
+  return Math.hypot(dx, dy);
+}
+export function anchorPoint(item, anchor) {
+  const [fx, fy] = snapAnchors[anchor];
+  return { x: item.x + fx * item.w, y: item.y + fy * item.h };
+}
+// Returns the closest anchor within range (in canvas units), or null.
+export function nearestAnchor(items, point, range) {
+  let best = null;
+  for (const item of items) {
+    if (!isSnapTarget(item)) continue;
+    for (const anchor of Object.keys(snapAnchors)) {
+      const at = anchorPoint(item, anchor);
+      const distance = Math.hypot(at.x - point.x, at.y - point.y);
+      if (distance <= range && (!best || distance < best.distance)) best = { id: item.id, anchor, point: at, distance };
+    }
+  }
+  return best;
+}
+// Re-derives snapped arrow ends from their blocks so arrows follow blocks that moved or resized.
+export function syncSnappedConnectors(items) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return items.map((item) => {
+    if (!isConnector(item) || (!item.startSnap && !item.endSnap)) return item;
+    const before = connectorPoints(item), points = { ...before };
+    const updates = {};
+    for (const handle of ['start', 'end']) {
+      const snap = item[`${handle}Snap`];
+      if (!snap) continue;
+      const target = byId.get(snap.id);
+      if (!target || !isSnapTarget(target) || !snapAnchors[snap.anchor]) { updates[`${handle}Snap`] = undefined; continue; }
+      points[handle] = anchorPoint(target, snap.anchor);
+    }
+    // Keep a curved arrow's bend point at the same offset from the arrow's midpoint.
+    const shift = { x: (points.start.x + points.end.x - before.start.x - before.end.x) / 2, y: (points.start.y + points.end.y - before.start.y - before.end.y) / 2 };
+    points.middle = { x: before.middle.x + shift.x, y: before.middle.y + shift.y };
+    return reshapeConnector({ ...item, ...updates }, points, Boolean(item.bendPoint));
+  });
+}
+// An arrow moved or resized on its own leaves its snapped ends; ends whose block moves with it stay snapped.
+export function detachUnmoved(item, movedIds) {
+  const keep = (snap) => (snap && movedIds.has(snap.id) ? snap : undefined);
+  return { ...item, startSnap: keep(item.startSnap), endSnap: keep(item.endSnap) };
 }
 export function bounds(items) {
   const x = Math.min(...items.map((item) => item.x));

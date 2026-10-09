@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mapRange, applySnapshot, bounds, connectorPoints, connectorPath, reshapeConnector, reflectConnector } from '../src/canvas-model.js';
+import { mapRange, applySnapshot, bounds, connectorPoints, connectorPath, reshapeConnector, reflectConnector, anchorPoint, nearestAnchor, syncSnappedConnectors, detachUnmoved, distanceToBox } from '../src/canvas-model.js';
 
 assert.deepEqual(mapRange(3, 4, [['insert', 0, 0, 0, 2], ['equal', 0, 6, 2, 8]]), [5, 6]);
 assert.deepEqual(mapRange(3, 4, [['equal', 0, 3, 0, 3], ['insert', 3, 3, 3, 5], ['equal', 3, 6, 5, 8]]), [3, 6]);
@@ -39,3 +39,39 @@ assert.deepEqual(connectorPoints(reflected), connectorPoints(curved));
 const resized = { ...curved, w: curved.w * 2, h: curved.h * 2 };
 assert.equal(connectorPoints(resized).middle.x, curved.x + 2 * (connectorPoints(curved).middle.x - curved.x));
 console.log('Connector curves, crossing endpoints, reflections, and resizing passed.');
+
+const block = { id: 'block', type: 'box', x: 100, y: 100, w: 200, h: 100 };
+assert.deepEqual(anchorPoint(block, 'nw'), { x: 100, y: 100 });
+assert.deepEqual(anchorPoint(block, 'n'), { x: 200, y: 100 });
+assert.deepEqual(anchorPoint(block, 'se'), { x: 300, y: 200 });
+assert.deepEqual(anchorPoint(block, 'w'), { x: 100, y: 150 });
+assert.equal(nearestAnchor([block], { x: 106, y: 94 }, 10).anchor, 'nw');
+assert.equal(nearestAnchor([block], { x: 150, y: 150 }, 10), null);
+assert.equal(nearestAnchor([{ ...block, type: 'frame' }], { x: 100, y: 100 }, 10), null);
+const arrow = reshapeConnector({ id: 'arrow', type: 'arrow', x: 0, y: 0, w: 1, h: 1, color: '#fff', thickness: 2 }, { start: { x: 300, y: 150 }, end: { x: 500, y: 400 }, middle: { x: 400, y: 275 } }, false);
+const snapped = { ...arrow, startSnap: { id: 'block', anchor: 'e' } };
+assert.deepEqual(connectorPoints(syncSnappedConnectors([block, snapped])[1]).start, { x: 300, y: 150 });
+const dragged = syncSnappedConnectors([{ ...block, x: 160, y: 80 }, snapped])[1];
+assert.deepEqual(connectorPoints(dragged).start, { x: 360, y: 130 });
+assert.deepEqual(connectorPoints(dragged).end, { x: 500, y: 400 });
+const stretched = syncSnappedConnectors([{ ...block, w: 300 }, snapped])[1];
+assert.deepEqual(connectorPoints(stretched).start, { x: 400, y: 150 });
+const removed = syncSnappedConnectors([snapped])[0];
+assert.equal(removed.startSnap, undefined);
+assert.deepEqual(connectorPoints(removed).start, { x: 300, y: 150 });
+const bentBase = reshapeConnector({ ...arrow, type: 'bend' }, { start: { x: 300, y: 150 }, end: { x: 500, y: 400 }, middle: { x: 500, y: 150 } }, true);
+const bent = { ...bentBase, startSnap: { id: 'block', anchor: 'e' }, endSnap: { id: 'other', anchor: 'nw' } };
+const bentMoved = syncSnappedConnectors([{ ...block, x: 160, y: 80 }, { id: 'other', type: 'box', x: 500, y: 400, w: 50, h: 50 }, bent])[2];
+assert.deepEqual(connectorPoints(bentMoved).start, { x: 360, y: 130 });
+assert.deepEqual(connectorPoints(bentMoved).middle, { x: 530, y: 140 });
+const unchanged = { type: 'line', id: 'line', x: 0, y: 0, w: 10, h: 10 };
+assert.equal(syncSnappedConnectors([block, unchanged])[1], unchanged);
+assert.equal(detachUnmoved(snapped, new Set(['other'])).startSnap, undefined);
+assert.deepEqual(detachUnmoved(snapped, new Set(['block'])).startSnap, { id: 'block', anchor: 'e' });
+assert.equal(reflectConnector(snapped, 'x').startSnap, undefined);
+console.log('Arrow snapping to block anchors, following moved blocks, and detaching checks passed.');
+
+assert.equal(distanceToBox(block, { x: 150, y: 150 }), 0);
+assert.equal(distanceToBox(block, { x: 310, y: 150 }), 10);
+assert.equal(distanceToBox(block, { x: 303, y: 204 }), 5);
+console.log('Nearby distance checks passed.');

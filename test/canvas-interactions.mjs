@@ -74,10 +74,12 @@ try {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 6 }); await page.mouse.up();
   };
+  // Arrows are placed with two clicks: the start point, then the end point.
   async function draw(tool, y) {
     await page.getByRole('button', { name: tool, exact: true }).click();
-    await page.mouse.move(rect.x + 120, rect.y + y); await page.mouse.down();
-    await page.mouse.move(rect.x + 300, rect.y + y, { steps: 5 }); await page.mouse.up();
+    await page.mouse.click(rect.x + 120, rect.y + y);
+    await page.mouse.move(rect.x + 300, rect.y + y, { steps: 5 });
+    await page.mouse.click(rect.x + 300, rect.y + y);
   }
   const positions = async () => page.locator('.canvas-point-handle').evaluateAll((elements) => Object.fromEntries(elements.map((element) => [element.getAttribute('aria-label'), { x: parseFloat(element.style.left), y: parseFloat(element.style.top) }])));
   await draw('Bend arrow', 180);
@@ -118,6 +120,13 @@ try {
   before = after; await drag(start, -30, -30); after = await positions();
   assert.deepEqual(after['Move arrow end point'], before['Move arrow end point']);
   assert.ok(after['Move arrow start point'].x < before['Move arrow start point'].x);
+  // Right-click cancels an arrow that is still waiting for its end point and returns to the select pointer.
+  const arrowsBeforeCancel = await page.locator('.canvas-arrow').count();
+  await page.getByRole('button', { name: 'Arrow', exact: true }).click();
+  await page.mouse.click(rect.x + 120, rect.y + 250);
+  await page.mouse.click(rect.x + 120, rect.y + 250, { button: 'right' });
+  assert.equal(await page.getByRole('button', { name: 'Select', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('.canvas-arrow').count(), arrowsBeforeCancel);
   await page.getByRole('button', { name: 'Undo canvas change', exact: true }).click();
   await page.getByRole('button', { name: 'Redo canvas change', exact: true }).click();
   await page.getByRole('button', { name: 'Close repository', exact: true }).click();

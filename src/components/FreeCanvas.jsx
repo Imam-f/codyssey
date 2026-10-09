@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MousePointer2, Hand, Square, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, BringToFront, SendToBack, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
 import { api, isDesktop } from '../util';
 import { initHighlighter } from '../highlight';
-import { applySnapshot, bounds, codeItem, connectorPath, connectorPoints, emptyCanvas, isConnector, reflectConnector, reshapeConnector, uid } from '../canvas-model';
+import { anchorPoint, applySnapshot, bounds, canSnap, codeItem, connectorPath, connectorPoints, detachUnmoved, distanceToBox, emptyCanvas, isConnector, isSnapTarget, nearestAnchor, reflectConnector, reshapeConnector, snapAnchors, syncSnappedConnectors, uid } from '../canvas-model';
 import '../free-canvas.css';
 
 const tools = [['select', MousePointer2, 'Select'], ['hand', Hand, 'Pan'], ['box', Square, 'Box'], ['line', Minus, 'Line'], ['arrow', ArrowUpRight, 'Arrow'], ['bend', CornerDownRight, 'Bend arrow'], ['text', Type, 'Text'], ['frame', Frame, 'Frame']];
@@ -56,6 +56,11 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   const [start, setStart] = useState(1), [end, setEnd] = useState(1);
   const [message, setMessage] = useState('');
   const [marquee, setMarquee] = useState(null);
+  // Cursor position and active snap while an arrow end is dragged, placed, or hovered; nearby blocks show anchor points.
+  const [snapGuide, setSnapGuide] = useState(null);
+  // An arrow placed with two clicks waits for its end point; `pending` holds the arrow being placed.
+  const [placing, setPlacing] = useState(false);
+  const pending = useRef(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [watchVersion, setWatchVersion] = useState(0);
   const history = useRef({ past: [], future: [] });
@@ -121,11 +126,33 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   }
   function changeSelected(patch) {
     checkpoint();
-    setDoc((previous) => ({ ...previous, items: previous.items.map((item) => selection.includes(item.id) ? { ...item, ...patch } : item) }));
+    setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.map((item) => selection.includes(item.id) ? { ...item, ...patch } : item)) }));
   }
   function point(event) {
     const rect = surface.current.getBoundingClientRect(), view = docRef.current.viewport;
     return { x: (event.clientX - rect.left - view.x) / view.zoom, y: (event.clientY - rect.top - view.y) / view.zoom };
+  }
+  // Snap distance stays about 14 screen pixels regardless of zoom.
+  const snapRange = () => 14 / docRef.current.viewport.zoom;
+  function placeArrowEnd(id, start, startSnap, end, endSnap) {
+    const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    setDoc((previous) => ({ ...previous, items: previous.items.map((item) => item.id === id ? reshapeConnector({ ...item, startSnap, endSnap }, { start, end, middle }, false) : item) }));
+  }
+  // The arrow follows the cursor between clicks, snapping its end to anchors.
+  function previewArrow(p) {
+    const { id, start, startSnap } = pending.current;
+    const hit = nearestAnchor(docRef.current.items, p, snapRange());
+    const endSnap = hit ? { id: hit.id, anchor: hit.anchor } : undefined;
+    placeArrowEnd(id, start, startSnap, hit ? hit.point : p, endSnap);
+    setSnapGuide({ at: p, active: endSnap || null });
+  }
+  // Escape or switching tools removes an arrow that has a start but no end yet.
+  function cancelPending() {
+    if (!pending.current) return;
+    const { id } = pending.current;
+    pending.current = null; setPlacing(false); setSnapGuide(null);
+    setDoc((previous) => ({ ...previous, items: previous.items.filter((item) => item.id !== id) }));
+    history.current.past.pop(); setHistoryVersion((value) => value + 1);
   }
   function center() {
     const view = docRef.current.viewport, rect = surface.current?.getBoundingClientRect();
@@ -155,21 +182,43 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     event.preventDefault(); event.stopPropagation();
     surface.current.focus(); surface.current.setPointerCapture(event.pointerId);
     checkpoint();
-    gesture.current = { type: 'connector', handle, item: single, points: connectorPoints(single), p: point(event) };
+    const at = point(event);
+    gesture.current = { type: 'connector', handle, item: single, points: connectorPoints(single), p: at };
+    if (handle !== 'middle' && canSnap(single)) setSnapGuide({ at, active: single[`${handle}Snap`] || null });
   }
-  function moveConnectorHandle(item, handle, destination) {
+  // Snapping can be skipped (keyboard nudges) so a nudge can move an end off its anchor.
+  function moveConnectorHandle(item, handle, destination, snap = true) {
     const points = connectorPoints(item);
-    points[handle] = destination;
-    return reshapeConnector(item, points, handle === 'middle' || Boolean(item.bendPoint));
+    const hit = handle !== 'middle' && snap && canSnap(item) ? nearestAnchor(docRef.current.items, destination, snapRange()) : null;
+    points[handle] = hit ? hit.point : destination;
+    const changed = reshapeConnector(item, points, handle === 'middle' || Boolean(item.bendPoint));
+    if (handle !== 'middle' && canSnap(item)) changed[`${handle}Snap`] = hit ? { id: hit.id, anchor: hit.anchor } : undefined;
+    return changed;
   }
   function begin(event, item = null, resize = false, moveSelection = false) {
     if (event.target.closest('button,input,textarea,select') && !resize) return;
+    if (event.button === 2) {
+      // Right-click cancels an unfinished arrow and returns to the select pointer.
+      event.preventDefault(); cancelPending(); setTool('select'); return;
+    }
     if (event.button !== 0 && event.button !== 1) return;
     event.preventDefault(); event.stopPropagation();
     surface.current.focus(); surface.current.setPointerCapture(event.pointerId);
     const p = point(event), original = docRef.current;
     if (tool === 'hand' || event.button === 1 || event.altKey) {
       gesture.current = { type: 'pan', x: event.clientX, y: event.clientY, view: original.viewport }; return;
+    }
+    if (pending.current) {
+      // The second click sets the arrow's end point.
+      const { id, start, startSnap } = pending.current;
+      const hit = nearestAnchor(original.items, p, snapRange());
+      const far = (point) => Math.hypot(point.x - start.x, point.y - start.y) >= 5;
+      // A click on the start point gives a default-sized arrow instead of a zero-length one.
+      const snapped = hit && far(hit.point) ? hit : null;
+      const end = snapped ? snapped.point : far(p) ? p : { x: start.x + 220, y: start.y + 80 };
+      placeArrowEnd(id, start, startSnap, end, snapped ? { id: snapped.id, anchor: snapped.anchor } : undefined);
+      pending.current = null; setPlacing(false); setSnapGuide(null); setSelection([id]); setTool('select');
+      return;
     }
     if (tool !== 'select' && !resize) item = null;
     if (item || resize || moveSelection) {
@@ -189,8 +238,17 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
       gesture.current = { type: 'marquee', p, selection: event.shiftKey ? selection : [] }; setMarquee({ x: p.x, y: p.y, w: 0, h: 0 }); return;
     }
     checkpoint();
-    const itemToAdd = { id: uid(), type: tool, ...p, w: 1, h: 1, ...style, text: tool === 'frame' ? 'Frame' : tool === 'text' ? 'Text' : '', bend: 0.5 };
+    // An arrow started on one of a block's anchors begins exactly at that anchor.
+    const startHit = canSnap({ type: tool }) ? nearestAnchor(docRef.current.items, p, snapRange()) : null;
+    const start = startHit ? startHit.point : p;
+    const startSnap = startHit ? { id: startHit.id, anchor: startHit.anchor } : undefined;
+    const itemToAdd = { id: uid(), type: tool, ...start, w: 1, h: 1, ...style, text: tool === 'frame' ? 'Frame' : tool === 'text' ? 'Text' : '', bend: 0.5, startSnap };
     setDoc((previous) => ({ ...previous, items: tool === 'frame' ? [itemToAdd, ...previous.items] : [...previous.items, itemToAdd] }));
+    if (canSnap(itemToAdd)) {
+      // Arrows take two clicks: this click sets the start, and the next click sets the end.
+      pending.current = { id: itemToAdd.id, start, startSnap }; setPlacing(true);
+      setSelection([]); setSnapGuide({ at: p, active: startSnap || null }); return;
+    }
     setSelection([itemToAdd.id]); gesture.current = { type: 'draw', p, id: itemToAdd.id };
   }
   function beginSelection(event) {
@@ -204,7 +262,15 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   }
   function move(event) {
     const action = gesture.current;
-    if (!action) return;
+    if (!action) {
+      if (pending.current) { previewArrow(point(event)); return; }
+      // Before an arrow is placed, hovering near an anchor highlights it.
+      if (canSnap({ type: tool })) {
+        const at = point(event), hit = nearestAnchor(docRef.current.items, at, snapRange());
+        setSnapGuide({ at, active: hit ? { id: hit.id, anchor: hit.anchor } : null });
+      }
+      return;
+    }
     const p = point(event), dx = p.x - action.p?.x, dy = p.y - action.p?.y;
     if (action.type === 'pan') {
       setDoc((previous) => ({ ...previous, viewport: { ...action.view, x: action.view.x + event.clientX - action.x, y: action.view.y + event.clientY - action.y } })); return;
@@ -213,6 +279,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     if (action.type === 'connector') {
       const original = action.points[action.handle];
       const changed = moveConnectorHandle(action.item, action.handle, { x: original.x + dx, y: original.y + dy });
+      if (action.handle !== 'middle' && canSnap(action.item)) setSnapGuide({ at: p, active: changed[`${action.handle}Snap`] || null });
       setDoc((previous) => ({ ...previous, items: previous.items.map((item) => item.id === changed.id ? changed : item) })); return;
     }
     if (action.type === 'draw') {
@@ -220,12 +287,14 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     }
     const box = action.bounds;
     const sx = Math.max(24, box.w + dx) / Math.max(1, box.w), sy = Math.max(24, box.h + dy) / Math.max(1, box.h);
-    setDoc((previous) => ({ ...previous, items: previous.items.map((current) => {
+    const moved = new Set(action.ids);
+    setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.map((current) => {
       const item = action.items.find((original) => original.id === current.id);
       if (!item || !action.ids.includes(item.id)) return current;
-      return action.type === 'move' ? { ...current, x: item.x + dx, y: item.y + dy } :
-        { ...current, x: box.x + (item.x - box.x) * sx, y: box.y + (item.y - box.y) * sy, w: item.w * sx, h: item.h * sy };
-    }) }));
+      const next = action.type === 'move' ? { ...item, x: item.x + dx, y: item.y + dy } :
+        { ...item, x: box.x + (item.x - box.x) * sx, y: box.y + (item.y - box.y) * sy, w: item.w * sx, h: item.h * sy };
+      return isConnector(item) ? detachUnmoved(next, moved) : next;
+    })) }));
   }
   function finish() {
     const action = gesture.current;
@@ -236,14 +305,23 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
       setSelection([...new Set([...action.selection, ...ids])]);
     }
     if (action?.type === 'draw') {
-      setDoc((previous) => ({ ...previous, items: previous.items.map((item) => item.id === action.id && item.w < 5 && item.h < 5 ? { ...item, w: item.type === 'frame' ? 560 : 220, h: item.type === 'text' ? 70 : isConnector(item) ? 80 : 160 } : item) }));
+      setDoc((previous) => ({ ...previous, items: previous.items.map((item) => {
+        if (item.id !== action.id || item.w >= 5 || item.h >= 5) return item;
+        if (isConnector(item)) {
+          // A click without a drag creates a default-sized arrow from its start point.
+          const start = connectorPoints(item).start, end = { x: start.x + 220, y: start.y + 80 };
+          return reshapeConnector(item, { start, end, middle: { x: start.x + 110, y: start.y + 40 } }, false);
+        }
+        return { ...item, w: item.type === 'frame' ? 560 : 220, h: item.type === 'text' ? 70 : 160 };
+      }) }));
       setTool('select');
     }
     gesture.current = null; setMarquee(null);
+    if (!pending.current) setSnapGuide(null);
   }
   function remove() {
     if (!selection.length) return;
-    checkpoint(); setDoc((previous) => ({ ...previous, items: previous.items.filter((item) => !selection.includes(item.id)) })); setSelection([]);
+    checkpoint(); setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.filter((item) => !selection.includes(item.id))) })); setSelection([]);
   }
   function group() { if (selected.length > 1) changeSelected({ group: uid() }); }
   function changeLayer(front) {
@@ -281,7 +359,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     const keydown = (event) => {
       if (event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); }
-      if (event.key === 'Escape') { setPicker(false); setSelection([]); setTool('select'); }
+      if (event.key === 'Escape') { cancelPending(); setPicker(false); setSelection([]); setTool('select'); }
       if (event.ctrlKey || event.metaKey) {
         const key = event.key.toLowerCase();
         if (key === 'z') { event.preventDefault(); undo(event.shiftKey); }
@@ -301,7 +379,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
 
   return <div className="free-canvas" data-history-version={historyVersion}>
     <div className="canvas-toolbar" role="toolbar" aria-label="Canvas tools">
-      {tools.map(([id, Icon, label]) => <button key={id} className={tool === id ? 'active' : ''} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => setTool(id)}><Icon size={16} /></button>)}
+      {tools.map(([id, Icon, label]) => <button key={id} className={tool === id ? 'active' : ''} aria-label={label} title={label} aria-pressed={tool === id} onClick={() => { cancelPending(); setTool(id); }}><Icon size={16} /></button>)}
       <span className="canvas-divider" />
       <button onClick={() => setPicker(true)}><Code2 size={15} />Add code</button>
       <button aria-label="Group selection" title="Group · Ctrl+G" disabled={selected.length < 2} onClick={group}><Group size={15} /></button>
@@ -316,13 +394,13 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     </div>
     <div className="canvas-workarea">
       <div ref={surface} className={`canvas-surface tool-${tool}`} role="region" aria-label="Free canvas" tabIndex={0}
-        onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}
+        onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish} onPointerLeave={() => { if (!gesture.current) setSnapGuide(null); }} onContextMenu={(event) => event.preventDefault()}
         onWheel={(event) => { if (event.ctrlKey || event.metaKey) zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1); else setDoc((previous) => ({ ...previous, viewport: { ...previous.viewport, x: previous.viewport.x - event.deltaX, y: previous.viewport.y - event.deltaY } })); }}>
         <div className="canvas-world" style={{ transform: `translate(${doc.viewport.x}px, ${doc.viewport.y}px) scale(${doc.viewport.zoom})` }}>
           {doc.items.map((item) => {
             const connector = isConnector(item);
             const path = connector ? connectorPath(item) : null;
-            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''}`}
+            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''} ${snapGuide?.active?.id === item.id ? 'is-snap-target' : ''}`}
               style={{ left: item.x, top: item.y, width: item.w, height: item.h, '--item-color': item.color, '--item-thickness': `${item.thickness}px` }} onPointerDown={connector ? undefined : (event) => begin(event, item)}>
               {connector ? <svg width={item.w} height={item.h} style={{ overflow: 'visible', pointerEvents: 'none' }}>
                 <defs><marker id={`tip-${item.id}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" fill="none" stroke={item.color} strokeWidth="1.5" /></marker></defs>
@@ -335,8 +413,12 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
             </div>;
           })}
           {selectedBounds && !(single && isConnector(single)) && <div className={`canvas-selection ${selected.length > 1 ? 'canvas-selection-multiple' : ''}`} style={{ left: selectedBounds.x - 4, top: selectedBounds.y - 4, width: selectedBounds.w + 8, height: selectedBounds.h + 8 }} onPointerDown={selected.length > 1 ? beginSelection : undefined}><button className="canvas-resize" aria-label="Resize selection" onPointerDown={(event) => begin(event, null, true)} /></div>}
+          {snapGuide && doc.items.filter(isSnapTarget).filter((item) => snapGuide.active?.id === item.id || distanceToBox(item, snapGuide.at) <= 40 / doc.viewport.zoom).flatMap((item) => Object.keys(snapAnchors).map((anchor) => {
+            const at = anchorPoint(item, anchor), active = snapGuide.active?.id === item.id && snapGuide.active.anchor === anchor;
+            return <span key={`${item.id}-${anchor}`} className={`canvas-anchor-dot ${active ? 'is-active' : ''}`} style={{ left: at.x, top: at.y, transform: `translate(-50%, -50%) scale(${1 / doc.viewport.zoom})` }} />;
+          }))}
           {single && isConnector(single) && Object.entries(connectorPoints(single)).filter(([handle]) => handle !== 'middle' || single.type === 'bend').map(([handle, point]) => <button
-            key={handle} className={`canvas-point-handle ${handle === 'middle' ? 'canvas-bend-handle' : ''}`}
+            key={handle} className={`canvas-point-handle ${handle === 'middle' ? 'canvas-bend-handle' : ''} ${single[`${handle}Snap`] ? 'is-snapped' : ''}`}
             aria-label={handle === 'middle' ? 'Move arrow curve point' : `Move ${single.type === 'line' ? 'line' : 'arrow'} ${handle} point`}
             title={handle === 'middle' ? 'Drag to curve the arrow' : `Drag ${handle} point`}
             style={{ left: point.x, top: point.y, transform: `translate(-50%, -50%) scale(${1 / doc.viewport.zoom})` }}
@@ -346,12 +428,12 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
               if (!delta) return;
               event.preventDefault(); event.stopPropagation();
               const distance = event.shiftKey ? 10 : 1;
-              changeSelected(moveConnectorHandle(single, handle, { x: point.x + delta[0] * distance, y: point.y + delta[1] * distance }));
+              changeSelected(moveConnectorHandle(single, handle, { x: point.x + delta[0] * distance, y: point.y + delta[1] * distance }, false));
             }} />)}
           {marquee && <div className="canvas-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
         </div>
         {!doc.items.length && <div className="canvas-empty"><Frame size={30} /><h2>Your code, in context</h2><p>Add a class, function, or a few lines. Draw connections and organize your ideas.</p><button className="primary" onClick={() => setPicker(true)}><Code2 size={14} />Add your first code block</button></div>}
-        <div className="canvas-hint">Drag to draw · Shift+click to select more · Alt+drag to pan</div>
+        <div className="canvas-hint">{placing ? 'Click to place the arrow end · Esc cancels' : canSnap({ type: tool }) ? 'Click to place the arrow start, then click for its end' : 'Drag to draw · Shift+click to select more · Alt+drag to pan'}</div>
         <div className="canvas-zoom"><button aria-label="Zoom out canvas" onClick={() => zoom(1 / 1.2)}><ZoomOut size={14} /></button><span>{Math.round(doc.viewport.zoom * 100)}%</span><button aria-label="Zoom in canvas" onClick={() => zoom(1.2)}><ZoomIn size={14} /></button><button aria-label="Fit canvas" onClick={fit}><Scan size={14} /></button></div>
       </div>
       <aside className="canvas-properties" aria-label="Canvas properties">
@@ -361,14 +443,14 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
         <div className="canvas-swatches">{colors.map((color) => <button key={color} aria-label={`Use color ${color}`} style={{ background: color }} onClick={() => { setStyle((value) => ({ ...value, color })); if (selected.length) changeSelected({ color }); }} />)}</div>
         {single?.type !== 'text' && <label>Thickness<input type="number" min="1" max="16" aria-label="Canvas thickness" value={single?.thickness || style.thickness} onChange={(event) => { const thickness = Math.min(16, Math.max(1, Number(event.target.value))); setStyle((value) => ({ ...value, thickness })); if (selected.length) changeSelected({ thickness }); }} /></label>}
         {single && <>
-          <div className="canvas-property-grid">{['x', 'y', 'w', 'h'].map((key) => <label key={key}>{({ x: 'X', y: 'Y', w: 'Width', h: 'Height' })[key]}<input aria-label={`Canvas ${key}`} type="number" value={Math.round(single[key])} onChange={(event) => changeSelected({ [key]: key === 'w' || key === 'h' ? Math.max(1, Number(event.target.value)) : Number(event.target.value) })} /></label>)}</div>
+          <div className="canvas-property-grid">{['x', 'y', 'w', 'h'].map((key) => <label key={key}>{({ x: 'X', y: 'Y', w: 'Width', h: 'Height' })[key]}<input aria-label={`Canvas ${key}`} type="number" value={Math.round(single[key])} onChange={(event) => changeSelected({ [key]: key === 'w' || key === 'h' ? Math.max(1, Number(event.target.value)) : Number(event.target.value), ...(isConnector(single) ? { startSnap: undefined, endSnap: undefined } : {}) })} /></label>)}</div>
           {single.type !== 'code' && !isConnector(single) && <label className="canvas-text-property">{single.type === 'frame' ? 'Frame name' : 'Text'}<textarea aria-label="Canvas text" value={single.text || ''} onChange={(event) => changeSelected({ text: event.target.value })} /></label>}
           {['text', 'box'].includes(single.type) && <>
             <label>Font<select aria-label="Canvas font" value={fonts[single.fontFamily] ? single.fontFamily : 'sans'} onChange={(event) => { const fontFamily = event.target.value; setStyle((value) => ({ ...value, fontFamily })); changeSelected({ fontFamily }); }}>{Object.entries(fonts).map(([key, font]) => <option key={key} value={key}>{font.label}</option>)}</select></label>
             <label>Weight<select aria-label="Canvas font weight" value={single.fontWeight || 400} onChange={(event) => { const fontWeight = Number(event.target.value); setStyle((value) => ({ ...value, fontWeight })); changeSelected({ fontWeight }); }}><option value="400">Regular</option><option value="500">Medium</option><option value="700">Bold</option></select></label>
             <label>Font size<input type="number" min="8" max="120" aria-label="Canvas font size" value={single.fontSize || 18} onChange={(event) => changeSelected({ fontSize: Math.min(120, Math.max(8, Number(event.target.value))) })} /></label>
           </>}
-          {isConnector(single) && <><button onClick={() => changeSelected(reflectConnector(single, 'x'))}>Reverse horizontal</button><button onClick={() => changeSelected(reflectConnector(single, 'y'))}>Reverse vertical</button><p className="canvas-property-note">Drag either endpoint to move it.{single.type === 'bend' && ' Drag the middle point to curve the arrow.'}</p></>}
+          {isConnector(single) && <><button onClick={() => changeSelected(reflectConnector(single, 'x'))}>Reverse horizontal</button><button onClick={() => changeSelected(reflectConnector(single, 'y'))}>Reverse vertical</button><p className="canvas-property-note">Drag either endpoint to move it.{single.type === 'bend' && ' Drag the middle point to curve the arrow.'}{canSnap(single) && ' Endpoints snap to the 8 points around a box and follow it when it moves.'}</p></>}
           {single.type === 'code' && <p className="canvas-property-note">{isDesktop ? 'Follows saved edits to the source file. Edit code in your editor.' : 'Sample code updates when you refresh the index. Live file tracking is available in the desktop app.'}</p>}
         </>}
         <p className="canvas-property-note">Canvas layouts save automatically for this repository. Drag a frame to move the elements inside it.</p>
