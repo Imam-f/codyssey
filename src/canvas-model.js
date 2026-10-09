@@ -3,6 +3,7 @@ import { declarationTarget } from './declaration.js';
 export const uid = () => crypto.randomUUID();
 export const emptyCanvas = () => ({ items: [], sources: {}, viewport: { x: 48, y: 48, zoom: 1 } });
 export const isConnector = (item) => ['line', 'arrow', 'bend'].includes(item.type);
+export const isShape = (item) => ['box', 'ellipse'].includes(item.type);
 export const defaultBoxFill = { fillColor: '#14171b', fillAlpha: 232 / 255, fillStyle: 'solid' };
 // Keep RGB and alpha independent so changing a swatch preserves transparency.
 export function colorWithAlpha(color, alpha = 1) {
@@ -52,7 +53,7 @@ export function reflectConnector(item, axis) {
   // Mirroring moves the ends away from their blocks, so they are no longer snapped.
   return { ...reshapeConnector(item, points), startSnap: undefined, endSnap: undefined };
 }
-// Arrow ends can snap to the eight anchors around a box, text, or code block.
+// Arrow ends can snap to the eight anchors around a shape, text, or code block.
 export const snapAnchors = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
 export const canSnap = (item) => ['arrow', 'bend'].includes(item.type);
 export const isSnapTarget = (item) => !isConnector(item) && item.type !== 'frame';
@@ -63,7 +64,13 @@ export function distanceToBox(item, point) {
   return Math.hypot(dx, dy);
 }
 export function anchorPoint(item, anchor) {
-  const [fx, fy] = snapAnchors[anchor];
+  let [fx, fy] = snapAnchors[anchor];
+  if (item.type === 'ellipse') {
+    // Project diagonal anchors onto the oval instead of its bounding-box corners.
+    const length = Math.hypot(2 * fx - 1, 2 * fy - 1);
+    fx = 0.5 + (fx - 0.5) / length;
+    fy = 0.5 + (fy - 0.5) / length;
+  }
   return { x: item.x + fx * item.w, y: item.y + fy * item.h };
 }
 // Returns the closest anchor within range (in canvas units), or null.

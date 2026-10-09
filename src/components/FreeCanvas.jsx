@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MousePointer2, Hand, Square, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, BringToFront, SendToBack, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
+import { MousePointer2, Hand, Square, Circle, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, BringToFront, SendToBack, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
 import { api, isDesktop } from '../util';
 import { initHighlighter } from '../highlight';
-import { anchorPoint, applySnapshot, bounds, canSnap, codeItem, colorWithAlpha, connectorPath, connectorPoints, defaultBoxFill, detachUnmoved, distanceToBox, emptyCanvas, isConnector, isSnapTarget, nearestAnchor, reflectConnector, reshapeConnector, snapAnchors, syncSnappedConnectors, uid } from '../canvas-model';
+import { anchorPoint, applySnapshot, bounds, canSnap, codeItem, colorWithAlpha, connectorPath, connectorPoints, defaultBoxFill, detachUnmoved, distanceToBox, emptyCanvas, isConnector, isShape, isSnapTarget, nearestAnchor, reflectConnector, reshapeConnector, snapAnchors, syncSnappedConnectors, uid } from '../canvas-model';
 import '../free-canvas.css';
 
-const tools = [['select', MousePointer2, 'Select'], ['hand', Hand, 'Pan'], ['box', Square, 'Box'], ['line', Minus, 'Line'], ['arrow', ArrowUpRight, 'Arrow'], ['bend', CornerDownRight, 'Bend arrow'], ['text', Type, 'Text'], ['frame', Frame, 'Frame']];
+const tools = [['select', MousePointer2, 'Select'], ['hand', Hand, 'Pan'], ['box', Square, 'Box'], ['ellipse', Circle, 'Ellipse'], ['line', Minus, 'Line'], ['arrow', ArrowUpRight, 'Arrow'], ['bend', CornerDownRight, 'Bend arrow'], ['text', Type, 'Text'], ['frame', Frame, 'Frame']];
 const colors = ['#89b4a2', '#b4a4df', '#79b8e8', '#e9b872', '#e88a94', '#c5cbd3'];
 const fillStyles = { solid: 'Solid color', parallel: 'Parallel lines', crossing: 'Crossing lines', dots: 'Dots' };
 const borderStyles = { solid: 'Solid', dashed: 'Dashed', dotted: 'Dotted' };
@@ -80,7 +80,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   const selected = doc.items.filter((item) => selection.includes(item.id));
   const selectedBounds = selected.length ? bounds(selected) : null;
   const single = selected.length === 1 ? selected[0] : null;
-  const selectedBox = selected.find((item) => item.type === 'box');
+  const selectedShape = selected.find(isShape);
   const watchPaths = [...new Set(doc.items.filter((item) => item.type === 'code').map((item) => item.target.path))].sort();
   const watchKey = JSON.stringify(watchPaths);
 
@@ -141,9 +141,9 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     checkpoint();
     setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.map((item) => selection.includes(item.id) && predicate(item) ? { ...item, ...patch } : item)) }));
   }
-  function changeStyle(patch, boxesOnly = false) {
+  function changeStyle(patch, shapesOnly = false) {
     setStyle((value) => ({ ...value, ...patch }));
-    if (selected.length) changeSelected(patch, (item) => !boxesOnly || item.type === 'box');
+    if (selected.length) changeSelected(patch, (item) => !shapesOnly || isShape(item));
   }
   function point(event) {
     const rect = surface.current.getBoundingClientRect(), view = docRef.current.viewport;
@@ -418,8 +418,8 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
             const connector = isConnector(item);
             const path = connector ? connectorPath(item) : null;
             const color = colorWithAlpha(item.color, item.colorAlpha);
-            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} data-fill-style={item.type === 'box' ? item.fillStyle ?? defaultBoxFill.fillStyle : undefined} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''} ${snapGuide?.active?.id === item.id ? 'is-snap-target' : ''}`}
-              style={{ left: item.x, top: item.y, width: item.w, height: item.h, borderStyle: item.type === 'box' ? item.borderStyle ?? 'solid' : undefined, '--item-color': color, '--item-fill': colorWithAlpha(item.fillColor ?? defaultBoxFill.fillColor, item.fillAlpha ?? defaultBoxFill.fillAlpha), '--item-thickness': `${item.thickness}px` }} onPointerDown={connector ? undefined : (event) => begin(event, item)}>
+            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} data-fill-style={isShape(item) ? item.fillStyle ?? defaultBoxFill.fillStyle : undefined} className={`canvas-item canvas-${item.type} ${isShape(item) ? 'canvas-shape' : ''} ${selection.includes(item.id) ? 'selected' : ''} ${snapGuide?.active?.id === item.id ? 'is-snap-target' : ''}`}
+              style={{ left: item.x, top: item.y, width: item.w, height: item.h, borderStyle: isShape(item) ? item.borderStyle ?? 'solid' : undefined, '--item-color': color, '--item-fill': colorWithAlpha(item.fillColor ?? defaultBoxFill.fillColor, item.fillAlpha ?? defaultBoxFill.fillAlpha), '--item-thickness': `${item.thickness}px` }} onPointerDown={connector ? undefined : (event) => begin(event, item)}>
               {connector ? <svg width={item.w} height={item.h} style={{ overflow: 'visible', pointerEvents: 'none' }}>
                 <defs><marker id={`tip-${item.id}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" fill="none" stroke={color} strokeWidth="1.5" /></marker></defs>
                 <path d={path} fill="none" stroke="transparent" strokeWidth={Math.max(12 / doc.viewport.zoom, item.thickness + 4 / doc.viewport.zoom)} className="canvas-connector-hit" onPointerDown={(event) => begin(event, item)} />
@@ -458,16 +458,16 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
         <div className="canvas-properties-content">
         <h3>{selected.length ? `${selected.length} selected` : 'Drawing style'}</h3>
         <ColorProperty color={single?.color ?? style.color} alpha={single ? single.colorAlpha ?? 1 : style.colorAlpha} onChange={changeStyle} />
-        {(!selected.length || selectedBox) && <>
-          <label>Border style<select aria-label="Canvas border style" value={selectedBox ? selectedBox.borderStyle ?? 'solid' : style.borderStyle} onChange={(event) => changeStyle({ borderStyle: event.target.value }, true)}>{Object.entries(borderStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label>Fill style<select aria-label="Canvas fill style" value={selectedBox ? selectedBox.fillStyle ?? defaultBoxFill.fillStyle : style.fillStyle} onChange={(event) => changeStyle({ fillStyle: event.target.value }, true)}>{Object.entries(fillStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <ColorProperty fill color={selectedBox ? selectedBox.fillColor ?? defaultBoxFill.fillColor : style.fillColor} alpha={selectedBox ? selectedBox.fillAlpha ?? defaultBoxFill.fillAlpha : style.fillAlpha} onChange={(patch) => changeStyle(patch, true)} />
+        {(!selected.length || selectedShape) && <>
+          <label>Border style<select aria-label="Canvas border style" value={selectedShape ? selectedShape.borderStyle ?? 'solid' : style.borderStyle} onChange={(event) => changeStyle({ borderStyle: event.target.value }, true)}>{Object.entries(borderStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Fill style<select aria-label="Canvas fill style" value={selectedShape ? selectedShape.fillStyle ?? defaultBoxFill.fillStyle : style.fillStyle} onChange={(event) => changeStyle({ fillStyle: event.target.value }, true)}>{Object.entries(fillStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <ColorProperty fill color={selectedShape ? selectedShape.fillColor ?? defaultBoxFill.fillColor : style.fillColor} alpha={selectedShape ? selectedShape.fillAlpha ?? defaultBoxFill.fillAlpha : style.fillAlpha} onChange={(patch) => changeStyle(patch, true)} />
         </>}
         {single?.type !== 'text' && <label>Thickness<input type="number" min="1" max="16" aria-label="Canvas thickness" value={single?.thickness || style.thickness} onChange={(event) => { const thickness = Math.min(16, Math.max(1, Number(event.target.value))); setStyle((value) => ({ ...value, thickness })); if (selected.length) changeSelected({ thickness }); }} /></label>}
         {single && <>
           <div className="canvas-property-grid">{['x', 'y', 'w', 'h'].map((key) => <label key={key}>{({ x: 'X', y: 'Y', w: 'Width', h: 'Height' })[key]}<input aria-label={`Canvas ${key}`} type="number" value={Math.round(single[key])} onChange={(event) => changeSelected({ [key]: key === 'w' || key === 'h' ? Math.max(1, Number(event.target.value)) : Number(event.target.value), ...(isConnector(single) ? { startSnap: undefined, endSnap: undefined } : {}) })} /></label>)}</div>
           {single.type !== 'code' && !isConnector(single) && <label className="canvas-text-property">{single.type === 'frame' ? 'Frame name' : 'Text'}<textarea aria-label="Canvas text" value={single.text || ''} onChange={(event) => changeSelected({ text: event.target.value })} /></label>}
-          {['text', 'box'].includes(single.type) && <>
+          {(single.type === 'text' || isShape(single)) && <>
             <label>Font<select aria-label="Canvas font" value={fonts[single.fontFamily] ? single.fontFamily : 'sans'} onChange={(event) => { const fontFamily = event.target.value; setStyle((value) => ({ ...value, fontFamily })); changeSelected({ fontFamily }); }}>{Object.entries(fonts).map(([key, font]) => <option key={key} value={key}>{font.label}</option>)}</select></label>
             <label>Weight<select aria-label="Canvas font weight" value={single.fontWeight || 400} onChange={(event) => { const fontWeight = Number(event.target.value); setStyle((value) => ({ ...value, fontWeight })); changeSelected({ fontWeight }); }}><option value="400">Regular</option><option value="500">Medium</option><option value="700">Bold</option></select></label>
             <label>Font size<input type="number" min="8" max="120" aria-label="Canvas font size" value={single.fontSize || 18} onChange={(event) => changeSelected({ fontSize: Math.min(120, Math.max(8, Number(event.target.value))) })} /></label>

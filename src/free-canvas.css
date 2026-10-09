@@ -9,12 +9,14 @@
 .canvas-surface:not(.tool-select):not(.tool-hand) { cursor: crosshair; }
 .canvas-world { position: absolute; width: 0; height: 0; transform-origin: 0 0; }
 .canvas-item { position: absolute; color: var(--item-color); cursor: move; }
-.canvas-box, .canvas-code, .canvas-frame, .canvas-text { border: var(--item-thickness) solid var(--item-color); border-radius: 6px; }
-.canvas-box { background: var(--item-fill, #14171be8); background-clip: padding-box; }
-.canvas-box[data-fill-style=parallel], .canvas-box[data-fill-style=crossing], .canvas-box[data-fill-style=dots] { background-color: transparent; }
-.canvas-box[data-fill-style=parallel] { background-image: repeating-linear-gradient(135deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px); }
-.canvas-box[data-fill-style=crossing] { background-image: repeating-linear-gradient(45deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px), repeating-linear-gradient(135deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px); }
-.canvas-box[data-fill-style=dots] { background-image: radial-gradient(circle at 6px 6px, var(--item-fill) 1.5px, transparent 1.75px); background-size: 12px 12px; }
+.canvas-shape, .canvas-code, .canvas-frame, .canvas-text { border: var(--item-thickness) solid var(--item-color); border-radius: 6px; }
+.canvas-shape { background: var(--item-fill, #14171be8); background-clip: padding-box; }
+.canvas-shape[data-fill-style=parallel], .canvas-shape[data-fill-style=crossing], .canvas-shape[data-fill-style=dots] { background-color: transparent; }
+.canvas-shape[data-fill-style=parallel] { background-image: repeating-linear-gradient(135deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px); }
+.canvas-shape[data-fill-style=crossing] { background-image: repeating-linear-gradient(45deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px), repeating-linear-gradient(135deg, var(--item-fill) 0 1.5px, transparent 1.5px 9px); }
+.canvas-shape[data-fill-style=dots] { background-image: radial-gradient(circle at 6px 6px, var(--item-fill) 1.5px, transparent 1.75px); background-size: 12px 12px; }
+.canvas-ellipse { border-radius: 50%; overflow: hidden; }
+.canvas-ellipse .canvas-item-text { display: flex; align-items: center; justify-content: center; text-align: center; }
 .canvas-text { border-color: transparent; }
 .canvas-item-text { padding: 12px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; width: 100%; height: 100%; overflow: hidden; }
 .canvas-frame { background: #89b4a206; border-style: dashed; }

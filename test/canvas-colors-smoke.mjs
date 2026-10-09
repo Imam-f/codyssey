@@ -196,6 +196,73 @@ try {
   await expect(borderStyle).toHaveValue('dashed');
   await expect(fillStyle).toHaveValue('dots');
   await expect(fillAlpha).toHaveValue('45');
+
+  // Ellipses share all shape styles and the normal drawing/selection workflow.
+  await canvas.press('Escape');
+  await fillStyle.selectOption('parallel');
+  await borderStyle.selectOption('dotted');
+  await page.getByRole('button', { name: 'Use fill color #b4a4df', exact: true }).click();
+  await fillAlpha.fill('55');
+  await page.getByRole('button', { name: 'Ellipse', exact: true }).click();
+  const rect = await canvas.boundingBox();
+  async function drag(x, y, endX, endY) {
+    await page.mouse.move(rect.x + x, rect.y + y); await page.mouse.down();
+    await page.mouse.move(rect.x + endX, rect.y + endY, { steps: 6 }); await page.mouse.up();
+  }
+  await drag(550, 440, 350, 320); // Drawing backwards normalizes the bounds.
+  const oval = page.locator('.canvas-ellipse');
+  await expect(oval).toHaveCount(1);
+  await expect(oval).toHaveClass(/selected/);
+  await expect(oval).toHaveCSS('border-radius', '50%');
+  await expect(oval).toHaveCSS('width', '200px');
+  await expect(oval).toHaveCSS('height', '120px');
+  await expect(oval).toHaveCSS('border-top-style', 'dotted');
+  assert.match(await oval.evaluate((element) => getComputedStyle(element).backgroundImage), /rgba\(180, 164, 223, 0\.55\)/);
+  // Empty bounding-box corners belong to the canvas, not the oval.
+  assert.notEqual(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.canvas-item')?.dataset.type, { x: rect.x + 352, y: rect.y + 322 }), 'ellipse');
+  for (const style of ['solid', 'parallel', 'crossing', 'dots']) {
+    await fillStyle.selectOption(style);
+    await expect(oval).toHaveAttribute('data-fill-style', style);
+  }
+  await page.getByLabel('Canvas text', { exact: true }).fill('Ellipse');
+  await page.getByLabel('Canvas font weight', { exact: true }).selectOption('700');
+  await expect(oval.locator('.canvas-item-text')).toHaveCSS('font-weight', '700');
+  await drag(450, 380, 475, 395);
+  await expect(oval).toHaveCSS('left', '375px');
+  await expect(oval).toHaveCSS('top', '335px');
+  const resize = await page.getByRole('button', { name: 'Resize selection', exact: true }).boundingBox();
+  await drag(resize.x + resize.width / 2 - rect.x, resize.y + resize.height / 2 - rect.y, resize.x + resize.width / 2 - rect.x + 40, resize.y + resize.height / 2 - rect.y + 20);
+  await expect(oval).toHaveCSS('width', '240px');
+  await expect(oval).toHaveCSS('height', '140px');
+  await page.getByRole('button', { name: 'Undo canvas change', exact: true }).click();
+  await expect(oval).toHaveCSS('width', '200px');
+  await page.getByRole('button', { name: 'Redo canvas change', exact: true }).click();
+  await expect(oval).toHaveCSS('width', '240px');
+  await page.getByRole('button', { name: 'Arrow', exact: true }).click();
+  await canvas.click({ position: { x: 615, y: 405 } });
+  await canvas.click({ position: { x: 750, y: 500 } });
+  const ovalLink = page.locator('.canvas-arrow').last();
+  await oval.click();
+  await page.getByLabel('Canvas x', { exact: true }).fill('400');
+  await expect(ovalLink).toHaveCSS('left', '640px');
+  await b.click({ modifiers: ['Shift'] });
+  await borderStyle.selectOption('dashed');
+  await expect(oval).toHaveCSS('border-top-style', 'dashed');
+  await expect(b).toHaveCSS('border-top-style', 'dashed');
+  await page.getByRole('button', { name: 'Close repository', exact: true }).click();
+  await page.getByRole('button', { name: /Explore the sample/ }).waitFor();
+  await sample();
+  await expect(oval).toHaveText('Ellipse');
+  await expect(oval).toHaveCSS('width', '240px');
+  await expect(oval).toHaveCSS('border-top-style', 'dashed');
+  await oval.click();
+  await expect(fillStyle).toHaveValue('dots');
+  await expect(fillAlpha).toHaveValue('55');
+  await expect(page.getByLabel('Canvas font weight', { exact: true })).toHaveValue('700');
+  await page.getByRole('button', { name: 'Delete selection', exact: true }).click();
+  await expect(oval).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo canvas change', exact: true }).click();
+  await expect(oval).toHaveCount(1);
   assert.deepEqual(errors, []);
-  console.log('Canvas styles passed: fills, reversed parallel lines, solid/dashed/dotted borders, color/alpha, mixed selections, drawing defaults, resizing, undo/redo, and persistence.');
+  console.log('Canvas styles and ellipses passed: fills/borders, alpha, drawing, oval hit targets, text/fonts, mixed selections, moving/resizing, snapping, undo/redo, and persistence.');
 } finally { await app.close(); }

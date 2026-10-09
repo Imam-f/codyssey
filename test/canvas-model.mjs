@@ -75,3 +75,15 @@ assert.equal(distanceToBox(block, { x: 150, y: 150 }), 0);
 assert.equal(distanceToBox(block, { x: 310, y: 150 }), 10);
 assert.equal(distanceToBox(block, { x: 303, y: 204 }), 5);
 console.log('Nearby distance checks passed.');
+
+const ellipse = { id: 'oval', type: 'ellipse', x: 100, y: 200, w: 240, h: 120 };
+assert.deepEqual(anchorPoint(ellipse, 'n'), { x: 220, y: 200 });
+assert.deepEqual(anchorPoint(ellipse, 'e'), { x: 340, y: 260 });
+const diagonal = anchorPoint(ellipse, 'ne');
+assert.ok(Math.abs(((diagonal.x - 220) / 120) ** 2 + ((diagonal.y - 260) / 60) ** 2 - 1) < 1e-12);
+assert.equal(nearestAnchor([ellipse], diagonal, 1).anchor, 'ne');
+assert.equal(nearestAnchor([ellipse], { x: 340, y: 200 }, 14), null);
+const ovalArrow = { ...arrow, startSnap: { id: ellipse.id, anchor: 'ne' } };
+const resizedOval = { ...ellipse, x: 130, y: 240, w: 360, h: 200 };
+assert.deepEqual(connectorPoints(syncSnappedConnectors([resizedOval, ovalArrow])[1]).start, anchorPoint(resizedOval, 'ne'));
+console.log('Ellipse anchors stay on the oval and snapped arrows follow movement and resizing.');
