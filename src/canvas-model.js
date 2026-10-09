@@ -3,6 +3,13 @@ import { declarationTarget } from './declaration.js';
 export const uid = () => crypto.randomUUID();
 export const emptyCanvas = () => ({ items: [], sources: {}, viewport: { x: 48, y: 48, zoom: 1 } });
 export const isConnector = (item) => ['line', 'arrow', 'bend'].includes(item.type);
+export const defaultBoxFill = { fillColor: '#14171b', fillAlpha: 232 / 255, fillStyle: 'solid' };
+// Keep RGB and alpha independent so changing a swatch preserves transparency.
+export function colorWithAlpha(color, alpha = 1) {
+  const opacity = Math.min(1, Math.max(0, Number.isFinite(alpha) ? alpha : 1));
+  if (opacity === 1) return color;
+  return `${color}${Math.round(opacity * 255).toString(16).padStart(2, '0')}`;
+}
 export function connectorPoints(item) {
   const world = (point) => ({ x: item.x + point.x * item.w, y: item.y + point.y * item.h });
   const start = world(item.startPoint || { x: item.flipX ? 1 : 0, y: item.flipY ? 1 : 0 });

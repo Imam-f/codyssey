@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MousePointer2, Hand, Square, Minus, ArrowUpRight, CornerDownRight, Type, Frame, Code2, Group, Ungroup, BringToFront, SendToBack, Trash2, Undo2, Redo2, Plus, ZoomIn, ZoomOut, Scan, X, ExternalLink } from 'lucide-react';
 import { api, isDesktop } from '../util';
 import { initHighlighter } from '../highlight';
-import { anchorPoint, applySnapshot, bounds, canSnap, codeItem, connectorPath, connectorPoints, detachUnmoved, distanceToBox, emptyCanvas, isConnector, isSnapTarget, nearestAnchor, reflectConnector, reshapeConnector, snapAnchors, syncSnappedConnectors, uid } from '../canvas-model';
+import { anchorPoint, applySnapshot, bounds, canSnap, codeItem, colorWithAlpha, connectorPath, connectorPoints, defaultBoxFill, detachUnmoved, distanceToBox, emptyCanvas, isConnector, isSnapTarget, nearestAnchor, reflectConnector, reshapeConnector, snapAnchors, syncSnappedConnectors, uid } from '../canvas-model';
 import '../free-canvas.css';
 
 const tools = [['select', MousePointer2, 'Select'], ['hand', Hand, 'Pan'], ['box', Square, 'Box'], ['line', Minus, 'Line'], ['arrow', ArrowUpRight, 'Arrow'], ['bend', CornerDownRight, 'Bend arrow'], ['text', Type, 'Text'], ['frame', Frame, 'Frame']];
 const colors = ['#89b4a2', '#b4a4df', '#79b8e8', '#e9b872', '#e88a94', '#c5cbd3'];
+const fillStyles = { solid: 'Solid color', parallel: 'Parallel lines', crossing: 'Crossing lines', dots: 'Dots' };
+const borderStyles = { solid: 'Solid', dashed: 'Dashed', dotted: 'Dotted' };
 const fonts = {
   sans: { label: 'Sans · Arial', family: 'Arial, Helvetica, sans-serif' },
   rounded: { label: 'Rounded · Trebuchet', family: '"Trebuchet MS", Arial, sans-serif' },
@@ -20,6 +22,16 @@ function readCanvas(repo) {
     if (Array.isArray(value?.items) && value.sources && value.viewport && Number.isFinite(value.viewport.zoom)) return value;
   } catch { /* Use an empty canvas if storage is unavailable. */ }
   return emptyCanvas();
+}
+function ColorProperty({ fill = false, color, alpha, onChange }) {
+  const colorKey = fill ? 'fillColor' : 'color', alphaKey = fill ? 'fillAlpha' : 'colorAlpha';
+  const name = fill ? 'Fill color' : 'Color';
+  const alphaName = fill ? 'Fill alpha' : 'Color alpha';
+  return <>
+    <label>{name}<input type="color" aria-label={`Canvas ${name.toLowerCase()}`} value={color} onChange={(event) => onChange({ [colorKey]: event.target.value })} /></label>
+    <div className="canvas-swatches">{colors.map((swatch) => <button key={swatch} aria-label={`Use ${fill ? 'fill color' : 'color'} ${swatch}`} style={{ background: swatch }} onClick={() => onChange({ [colorKey]: swatch })} />)}</div>
+    <label>{alphaName}<span className="canvas-alpha-input"><input type="number" min="0" max="100" step="1" aria-label={`Canvas ${alphaName.toLowerCase()}`} title="0% is transparent; 100% is opaque" value={Math.round(alpha * 100)} onChange={(event) => onChange({ [alphaKey]: Math.min(100, Math.max(0, Number(event.target.value))) / 100 })} /><span>%</span></span></label>
+  </>;
 }
 function CodeContent({ item, marks, onToggleMark, onSourceLocation }) {
   const [highlighted, setHighlighted] = useState({ source: null, tokens: [] });
@@ -48,7 +60,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   const docRef = useRef(doc); docRef.current = doc;
   const [selection, setSelection] = useState([]);
   const [tool, setTool] = useState('select');
-  const [style, setStyle] = useState({ color: colors[0], thickness: 2, fontFamily: 'sans', fontWeight: 400 });
+  const [style, setStyle] = useState({ color: colors[0], colorAlpha: 1, ...defaultBoxFill, borderStyle: 'solid', thickness: 2, fontFamily: 'sans', fontWeight: 400 });
   const [picker, setPicker] = useState(false);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('function');
@@ -68,6 +80,7 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
   const selected = doc.items.filter((item) => selection.includes(item.id));
   const selectedBounds = selected.length ? bounds(selected) : null;
   const single = selected.length === 1 ? selected[0] : null;
+  const selectedBox = selected.find((item) => item.type === 'box');
   const watchPaths = [...new Set(doc.items.filter((item) => item.type === 'code').map((item) => item.target.path))].sort();
   const watchKey = JSON.stringify(watchPaths);
 
@@ -124,9 +137,13 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
     const restored = from.pop();
     setDoc((previous) => ({ ...restored, viewport: previous.viewport })); setSelection([]); setHistoryVersion((value) => value + 1); setWatchVersion((value) => value + 1);
   }
-  function changeSelected(patch) {
+  function changeSelected(patch, predicate = () => true) {
     checkpoint();
-    setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.map((item) => selection.includes(item.id) ? { ...item, ...patch } : item)) }));
+    setDoc((previous) => ({ ...previous, items: syncSnappedConnectors(previous.items.map((item) => selection.includes(item.id) && predicate(item) ? { ...item, ...patch } : item)) }));
+  }
+  function changeStyle(patch, boxesOnly = false) {
+    setStyle((value) => ({ ...value, ...patch }));
+    if (selected.length) changeSelected(patch, (item) => !boxesOnly || item.type === 'box');
   }
   function point(event) {
     const rect = surface.current.getBoundingClientRect(), view = docRef.current.viewport;
@@ -400,12 +417,13 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
           {doc.items.map((item) => {
             const connector = isConnector(item);
             const path = connector ? connectorPath(item) : null;
-            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''} ${snapGuide?.active?.id === item.id ? 'is-snap-target' : ''}`}
-              style={{ left: item.x, top: item.y, width: item.w, height: item.h, '--item-color': item.color, '--item-thickness': `${item.thickness}px` }} onPointerDown={connector ? undefined : (event) => begin(event, item)}>
+            const color = colorWithAlpha(item.color, item.colorAlpha);
+            return <div key={item.id} data-canvas-id={item.id} data-type={item.type} data-fill-style={item.type === 'box' ? item.fillStyle ?? defaultBoxFill.fillStyle : undefined} className={`canvas-item canvas-${item.type} ${selection.includes(item.id) ? 'selected' : ''} ${snapGuide?.active?.id === item.id ? 'is-snap-target' : ''}`}
+              style={{ left: item.x, top: item.y, width: item.w, height: item.h, borderStyle: item.type === 'box' ? item.borderStyle ?? 'solid' : undefined, '--item-color': color, '--item-fill': colorWithAlpha(item.fillColor ?? defaultBoxFill.fillColor, item.fillAlpha ?? defaultBoxFill.fillAlpha), '--item-thickness': `${item.thickness}px` }} onPointerDown={connector ? undefined : (event) => begin(event, item)}>
               {connector ? <svg width={item.w} height={item.h} style={{ overflow: 'visible', pointerEvents: 'none' }}>
-                <defs><marker id={`tip-${item.id}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" fill="none" stroke={item.color} strokeWidth="1.5" /></marker></defs>
+                <defs><marker id={`tip-${item.id}`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" fill="none" stroke={color} strokeWidth="1.5" /></marker></defs>
                 <path d={path} fill="none" stroke="transparent" strokeWidth={Math.max(12 / doc.viewport.zoom, item.thickness + 4 / doc.viewport.zoom)} className="canvas-connector-hit" onPointerDown={(event) => begin(event, item)} />
-                <path d={path} fill="none" stroke={item.color} strokeWidth={item.thickness} markerEnd={item.type !== 'line' ? `url(#tip-${item.id})` : undefined} pointerEvents="none" />
+                <path d={path} fill="none" stroke={color} strokeWidth={item.thickness} markerEnd={item.type !== 'line' ? `url(#tip-${item.id})` : undefined} pointerEvents="none" />
               </svg> : item.type === 'code' ? <>
                 <div className="canvas-code-header"><Code2 size={13} /><strong>{item.title}</strong><span className={`canvas-live ${item.status !== 'found' ? 'stale' : ''}`}>{item.status === 'found' ? isDesktop ? 'Live' : 'Indexed' : item.status}</span><button aria-label={`Open source for ${item.title}`} onClick={() => onNavigate({ path: item.target.path, line: item.target.line })}><ExternalLink size={12} /></button></div>
                 <div className="canvas-code-location">{item.target.path}:{item.target.line}–{item.target.endLine}</div><CodeContent item={item} marks={marks} onToggleMark={onToggleMark} onSourceLocation={onSourceLocation} />
@@ -439,8 +457,12 @@ export default function FreeCanvas({ repo, active, onNavigate, request, marks, o
       <aside className="canvas-properties" aria-label="Canvas properties">
         <div className="canvas-properties-content">
         <h3>{selected.length ? `${selected.length} selected` : 'Drawing style'}</h3>
-        <label>Color<input type="color" aria-label="Canvas color" value={single?.color || style.color} onChange={(event) => { setStyle((value) => ({ ...value, color: event.target.value })); if (selected.length) changeSelected({ color: event.target.value }); }} /></label>
-        <div className="canvas-swatches">{colors.map((color) => <button key={color} aria-label={`Use color ${color}`} style={{ background: color }} onClick={() => { setStyle((value) => ({ ...value, color })); if (selected.length) changeSelected({ color }); }} />)}</div>
+        <ColorProperty color={single?.color ?? style.color} alpha={single ? single.colorAlpha ?? 1 : style.colorAlpha} onChange={changeStyle} />
+        {(!selected.length || selectedBox) && <>
+          <label>Border style<select aria-label="Canvas border style" value={selectedBox ? selectedBox.borderStyle ?? 'solid' : style.borderStyle} onChange={(event) => changeStyle({ borderStyle: event.target.value }, true)}>{Object.entries(borderStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Fill style<select aria-label="Canvas fill style" value={selectedBox ? selectedBox.fillStyle ?? defaultBoxFill.fillStyle : style.fillStyle} onChange={(event) => changeStyle({ fillStyle: event.target.value }, true)}>{Object.entries(fillStyles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <ColorProperty fill color={selectedBox ? selectedBox.fillColor ?? defaultBoxFill.fillColor : style.fillColor} alpha={selectedBox ? selectedBox.fillAlpha ?? defaultBoxFill.fillAlpha : style.fillAlpha} onChange={(patch) => changeStyle(patch, true)} />
+        </>}
         {single?.type !== 'text' && <label>Thickness<input type="number" min="1" max="16" aria-label="Canvas thickness" value={single?.thickness || style.thickness} onChange={(event) => { const thickness = Math.min(16, Math.max(1, Number(event.target.value))); setStyle((value) => ({ ...value, thickness })); if (selected.length) changeSelected({ thickness }); }} /></label>}
         {single && <>
           <div className="canvas-property-grid">{['x', 'y', 'w', 'h'].map((key) => <label key={key}>{({ x: 'X', y: 'Y', w: 'Width', h: 'Height' })[key]}<input aria-label={`Canvas ${key}`} type="number" value={Math.round(single[key])} onChange={(event) => changeSelected({ [key]: key === 'w' || key === 'h' ? Math.max(1, Number(event.target.value)) : Number(event.target.value), ...(isConnector(single) ? { startSnap: undefined, endSnap: undefined } : {}) })} /></label>)}</div>

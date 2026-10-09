@@ -20,6 +20,7 @@ try {
   await sample();
   await page.waitForFunction(() => Object.keys(localStorage).some((key) => key.startsWith('codyssey:canvas:')));
   await page.getByRole('button', { name: 'Close repository', exact: true }).click();
+  await page.getByRole('button', { name: /Explore the sample/ }).waitFor();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.startsWith('codyssey:canvas:'));
     const item = (id, type, x, y, w, h) => ({ id, type, x, y, w, h, color: '#89b4a2', thickness: 2, text: id });

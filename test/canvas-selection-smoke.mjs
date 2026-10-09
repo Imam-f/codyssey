@@ -20,6 +20,7 @@ try {
   await sample();
   await page.waitForFunction(() => Object.keys(localStorage).some((key) => key.startsWith('codyssey:canvas:')));
   await page.getByRole('button', { name: 'Close repository', exact: true }).click();
+  await page.getByRole('button', { name: /Explore the sample/ }).waitFor();
   // Restore a known layout to test actual pointer hit targets and zoom transforms.
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.startsWith('codyssey:canvas:'));
